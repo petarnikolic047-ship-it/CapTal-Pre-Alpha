@@ -1,20 +1,12 @@
-import type { BusinessId } from "../../game/economy";
-import type { GoalState } from "../../game/goals";
+import type { GoalContext, GoalState } from "../../game/goals";
 import { formatGoalLabel, formatGoalReward, getGoalProgress } from "../../game/goals";
 
 type GoalsBarProps = {
   goals: GoalState[];
-  counts: Record<BusinessId, number>;
-  purchasedUpgradesCount: number;
-  projectsStarted: number;
+  context: GoalContext;
 };
 
-const GoalsBar = ({
-  goals,
-  counts,
-  purchasedUpgradesCount,
-  projectsStarted,
-}: GoalsBarProps) => {
+const GoalsBar = ({ goals, context }: GoalsBarProps) => {
   return (
     <section className="goals-bar">
       <div className="goals-header">
@@ -25,12 +17,7 @@ const GoalsBar = ({
       ) : (
         <div className="goals-list">
           {goals.map((goal) => {
-            const progress = getGoalProgress(
-              goal,
-              counts,
-              purchasedUpgradesCount,
-              projectsStarted
-            );
+            const progress = getGoalProgress(goal, context);
             const current = Math.min(progress.current, progress.target);
             return (
               <div className="goal-item" key={goal.id}>

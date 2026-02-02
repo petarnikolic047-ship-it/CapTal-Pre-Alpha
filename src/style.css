@@ -62,6 +62,39 @@ body {
   flex-wrap: wrap;
 }
 
+.hud-toggles {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hud-button {
+  border: none;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  background: #eef2f7;
+  color: #3a4856;
+  cursor: pointer;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-button.active {
+  background: #1f2b38;
+  color: #ffffff;
+}
+
+.hud-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f97316;
+  box-shadow: 0 0 0 2px #fff7ed;
+}
+
 .tab-group {
   display: flex;
   gap: 8px;
@@ -325,6 +358,32 @@ body {
   text-transform: uppercase;
   letter-spacing: 1px;
   color: #9aa7b5;
+}
+
+.next-action {
+  background: #fff7ed;
+  border-radius: 16px;
+  padding: 12px 18px;
+  display: grid;
+  gap: 6px;
+  box-shadow: 0 10px 24px rgba(31, 38, 63, 0.08);
+}
+
+.next-action-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #c07a2b;
+}
+
+.next-action-title {
+  font-weight: 600;
+  color: #1f2b38;
+}
+
+.next-action-detail {
+  font-size: 12px;
+  color: #7a5b3b;
 }
 
 .goals-bar {
@@ -985,6 +1044,257 @@ body {
   box-shadow: 0 8px 16px rgba(31, 43, 56, 0.2);
 }
 
+.war-room {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 18px 22px;
+  box-shadow: 0 12px 28px rgba(31, 38, 63, 0.08);
+  display: grid;
+  gap: 16px;
+}
+
+.war-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.war-kicker {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #8d6a4a;
+}
+
+.war-header h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+}
+
+.war-trophies {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+  font-size: 12px;
+  color: #6b7b8a;
+}
+
+.war-trophies strong {
+  font-size: 20px;
+  color: #1f2b38;
+}
+
+.war-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.war-stat-card {
+  background: #f7f9fc;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.war-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #7a8896;
+}
+
+.war-stat-value {
+  font-weight: 600;
+  font-size: 16px;
+  color: #1f2b38;
+}
+
+.war-section {
+  display: grid;
+  gap: 10px;
+}
+
+.war-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.war-section-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.war-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.war-refresh {
+  border: none;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #eef2f7;
+  color: #3a4856;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.war-refresh:disabled {
+  background: #e5e7eb;
+  color: #9aa7b5;
+  cursor: not-allowed;
+}
+
+.war-refresh-timer {
+  font-size: 12px;
+  color: #6b7b8a;
+}
+
+.war-targets {
+  display: grid;
+  gap: 12px;
+}
+
+.war-target-card {
+  background: #f7f9fc;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.war-target-info {
+  display: grid;
+  gap: 4px;
+}
+
+.war-target-name {
+  font-weight: 600;
+  color: #1f2b38;
+}
+
+.war-target-meta {
+  font-size: 12px;
+  color: #6b7b8a;
+}
+
+.war-target-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.war-action-button {
+  border: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  background: #111827;
+  color: #ffffff;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.war-action-button:disabled {
+  background: #c6ccd4;
+  color: #5c6670;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.war-action-button:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(31, 43, 56, 0.2);
+}
+
+.war-cooldown {
+  font-size: 12px;
+  color: #6b7b8a;
+}
+
+.war-upgrades {
+  display: grid;
+  gap: 12px;
+}
+
+.war-upgrade-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #f7f9fc;
+  flex-wrap: wrap;
+}
+
+.war-upgrade-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.war-upgrade-desc {
+  font-size: 12px;
+  color: #6b7b8a;
+}
+
+.war-upgrade-meta {
+  font-size: 12px;
+  color: #7a8896;
+  margin-top: 4px;
+}
+
+.war-log {
+  display: grid;
+  gap: 8px;
+}
+
+.war-log-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 12px;
+  align-items: center;
+  font-size: 12px;
+  color: #4a5968;
+}
+
+.war-log-title {
+  font-weight: 600;
+  color: #1f2b38;
+}
+
+.war-log-meta {
+  font-size: 11px;
+  color: #6b7b8a;
+}
+
+.war-log-result {
+  font-weight: 600;
+}
+
+.war-log-result.win {
+  color: #1d6b4a;
+}
+
+.war-log-result.loss {
+  color: #b45309;
+}
+
+.war-empty {
+  font-size: 12px;
+  color: #6b7b8a;
+}
+
 @media (max-width: 720px) {
   .stat-bar {
     flex-direction: column;
@@ -1029,5 +1339,10 @@ body {
   .upgrade-card {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .war-log-item {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 }

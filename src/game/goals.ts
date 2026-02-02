@@ -1,7 +1,17 @@
 import type { BusinessId } from "./economy";
 import { BUSINESS_BY_ID } from "./economy";
+import type { BuildingTypeId } from "./base";
+import { BUILDING_BY_ID } from "./base";
 
-export type GoalType = "own-count" | "buy-upgrade" | "start-project";
+export type GoalType =
+  | "own-count"
+  | "buy-upgrade"
+  | "start-project"
+  | "hire-manager"
+  | "upgrade-hq"
+  | "upgrade-building"
+  | "place-building"
+  | "bulk-buy";
 
 export type GoalReward =
   | {
@@ -20,6 +30,7 @@ export type GoalState = {
   id: string;
   type: GoalType;
   businessId?: BusinessId;
+  buildingTypeId?: BuildingTypeId;
   target: number;
   reward: GoalReward;
 };
@@ -28,6 +39,21 @@ export type GoalProgress = {
   current: number;
   target: number;
   complete: boolean;
+};
+
+export type GoalContext = {
+  counts: Record<BusinessId, number>;
+  managersOwned: Record<BusinessId, boolean>;
+  bulkBuys: number;
+  purchasedUpgradesCount: number;
+  projectsStartedCount: number;
+  buildingLevels: Record<BuildingTypeId, number>;
+  buildingsBuiltCount: number;
+  hqLevel: number;
+  unbuiltBuildingTypes: BuildingTypeId[];
+  bulkBuyUnlocked: boolean;
+  hqTargetLevel: number | null;
+  canStartProject: boolean;
 };
 
 const BUSINESS_TARGETS = [10, 25, 50, 100];
@@ -70,42 +96,146 @@ const createProjectGoal = (target: number): GoalState => ({
   },
 });
 
+const createManagerGoal = (businessId: BusinessId): GoalState => ({
+  id: `manager-${businessId}`,
+  type: "hire-manager",
+  businessId,
+  target: 1,
+  reward: {
+    kind: "business-profit",
+    businessId,
+    mult: BUSINESS_PROFIT_MULT,
+    durationMs: GOAL_DURATION_MS,
+  },
+});
+
+const createHqUpgradeGoal = (targetLevel: number): GoalState => ({
+  id: `hq-${targetLevel}`,
+  type: "upgrade-hq",
+  target: targetLevel,
+  reward: {
+    kind: "project-time",
+    mult: PROJECT_TIME_MULT,
+    durationMs: GOAL_DURATION_MS,
+  },
+});
+
+const createBuildingUpgradeGoal = (
+  buildingTypeId: BuildingTypeId,
+  targetLevel: number
+): GoalState => {
+  const businessId = BUILDING_BY_ID[buildingTypeId]?.businessId;
+  return {
+    id: `building-${buildingTypeId}-${targetLevel}`,
+    type: "upgrade-building",
+    buildingTypeId,
+    target: targetLevel,
+    reward: businessId
+      ? {
+          kind: "business-profit",
+          businessId,
+          mult: BUSINESS_PROFIT_MULT,
+          durationMs: GOAL_DURATION_MS,
+        }
+      : {
+          kind: "project-time",
+          mult: PROJECT_TIME_MULT,
+          durationMs: GOAL_DURATION_MS,
+        },
+  };
+};
+
+const createPlaceBuildingGoal = (target: number): GoalState => ({
+  id: `place-building-${target}`,
+  type: "place-building",
+  target,
+  reward: {
+    kind: "project-time",
+    mult: PROJECT_TIME_MULT,
+    durationMs: GOAL_DURATION_MS,
+  },
+});
+
+const createBulkBuyGoal = (target: number): GoalState => ({
+  id: `bulk-buy-${target}`,
+  type: "bulk-buy",
+  target,
+  reward: {
+    kind: "project-time",
+    mult: PROJECT_TIME_MULT,
+    durationMs: GOAL_DURATION_MS,
+  },
+});
+
 export const buildGoalPool = (
-  counts: Record<BusinessId, number>,
-  purchasedUpgradesCount: number,
-  projectsStartedCount: number,
+  context: GoalContext,
   unlockedBusinessIds: BusinessId[]
 ) => {
   const pool: GoalState[] = [];
 
   for (const id of unlockedBusinessIds) {
-    const owned = counts[id] ?? 0;
+    const owned = context.counts[id] ?? 0;
     for (const target of BUSINESS_TARGETS) {
       if (owned < target) {
         pool.push(createBusinessGoal(id, target));
       }
     }
+    if (owned > 0 && !context.managersOwned[id]) {
+      pool.push(createManagerGoal(id));
+    }
   }
 
-  pool.push(createUpgradeGoal(purchasedUpgradesCount + 1));
-  pool.push(createProjectGoal(projectsStartedCount + 1));
+  pool.push(createUpgradeGoal(context.purchasedUpgradesCount + 1));
+  if (context.canStartProject) {
+    pool.push(createProjectGoal(context.projectsStartedCount + 1));
+  }
+
+  if (context.hqTargetLevel && context.hqTargetLevel > context.hqLevel) {
+    pool.push(createHqUpgradeGoal(context.hqTargetLevel));
+  }
+
+  const upgradeTargets = Object.entries(context.buildingLevels)
+    .filter(([typeId]) => typeId !== "hq")
+    .map(([typeId, level]) => ({
+      typeId: typeId as BuildingTypeId,
+      target: level + 1,
+    }))
+    .sort((a, b) => a.target - b.target);
+
+  if (upgradeTargets.length > 0) {
+    const target = upgradeTargets[0];
+    pool.push(createBuildingUpgradeGoal(target.typeId, target.target));
+  }
+
+  if (context.unbuiltBuildingTypes.length > 0) {
+    pool.push(createPlaceBuildingGoal(context.buildingsBuiltCount + 1));
+  }
+
+  if (context.bulkBuyUnlocked) {
+    pool.push(createBulkBuyGoal(context.bulkBuys + 1));
+  }
 
   return pool;
 };
 
-export const getGoalProgress = (
-  goal: GoalState,
-  counts: Record<BusinessId, number>,
-  purchasedUpgradesCount: number,
-  projectsStartedCount: number
-): GoalProgress => {
+export const getGoalProgress = (goal: GoalState, context: GoalContext): GoalProgress => {
   let current = 0;
   if (goal.type === "own-count" && goal.businessId) {
-    current = counts[goal.businessId] ?? 0;
+    current = context.counts[goal.businessId] ?? 0;
   } else if (goal.type === "buy-upgrade") {
-    current = purchasedUpgradesCount;
+    current = context.purchasedUpgradesCount;
   } else if (goal.type === "start-project") {
-    current = projectsStartedCount;
+    current = context.projectsStartedCount;
+  } else if (goal.type === "hire-manager" && goal.businessId) {
+    current = context.managersOwned[goal.businessId] ? 1 : 0;
+  } else if (goal.type === "upgrade-hq") {
+    current = context.hqLevel;
+  } else if (goal.type === "upgrade-building" && goal.buildingTypeId) {
+    current = context.buildingLevels[goal.buildingTypeId] ?? 0;
+  } else if (goal.type === "place-building") {
+    current = context.buildingsBuiltCount;
+  } else if (goal.type === "bulk-buy") {
+    current = context.bulkBuys;
   }
 
   return { current, target: goal.target, complete: current >= goal.target };
@@ -114,12 +244,32 @@ export const getGoalProgress = (
 export const formatGoalLabel = (goal: GoalState) => {
   if (goal.type === "own-count" && goal.businessId) {
     const name = BUSINESS_BY_ID[goal.businessId]?.name ?? "Business";
-    return `Own ${goal.target} ${name}`;
+    return `Hit milestone: Own ${goal.target} ${name}`;
   }
   if (goal.type === "buy-upgrade") {
     return `Buy ${goal.target} upgrade${goal.target === 1 ? "" : "s"}`;
   }
-  return `Start ${goal.target} project${goal.target === 1 ? "" : "s"}`;
+  if (goal.type === "start-project") {
+    return `Start ${goal.target} project${goal.target === 1 ? "" : "s"}`;
+  }
+  if (goal.type === "hire-manager" && goal.businessId) {
+    const name = BUSINESS_BY_ID[goal.businessId]?.name ?? "Business";
+    return `Hire ${name} manager`;
+  }
+  if (goal.type === "upgrade-hq") {
+    return `Upgrade HQ to level ${goal.target}`;
+  }
+  if (goal.type === "upgrade-building" && goal.buildingTypeId) {
+    const name = BUILDING_BY_ID[goal.buildingTypeId]?.name ?? "Building";
+    return `Upgrade ${name} to level ${goal.target}`;
+  }
+  if (goal.type === "place-building") {
+    return `Place ${goal.target} building${goal.target === 1 ? "" : "s"}`;
+  }
+  if (goal.type === "bulk-buy") {
+    return `Make ${goal.target} bulk buy${goal.target === 1 ? "" : "s"} (10+ units)`;
+  }
+  return "Complete a goal";
 };
 
 export const formatGoalReward = (goal: GoalState) => {
@@ -135,10 +285,33 @@ export const pickRandomGoals = (pool: GoalState[], count: number, excludeIds: st
   if (filtered.length <= count) {
     return filtered;
   }
-  const shuffled = [...filtered];
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  const byType = new Map<GoalType, GoalState[]>();
+  for (const goal of filtered) {
+    const list = byType.get(goal.type) ?? [];
+    list.push(goal);
+    byType.set(goal.type, list);
   }
-  return shuffled.slice(0, count);
+  const types = Array.from(byType.keys());
+  for (let i = types.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [types[i], types[j]] = [types[j], types[i]];
+  }
+  const result: GoalState[] = [];
+  for (const type of types) {
+    const list = byType.get(type);
+    if (!list || list.length === 0) {
+      continue;
+    }
+    const choice = list[Math.floor(Math.random() * list.length)];
+    result.push(choice);
+    if (result.length >= count) {
+      return result;
+    }
+  }
+  const remaining = filtered.filter((goal) => !result.includes(goal));
+  for (let i = remaining.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+  }
+  return result.concat(remaining.slice(0, count - result.length));
 };

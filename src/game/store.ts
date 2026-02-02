@@ -8,8 +8,10 @@ import {
   createPlots,
   getBuildingProfitMult,
   getBuildingTimeMult,
+  getHqConfig,
   getPlotCountForHqLevel,
   getQueueSlotsForHq,
+  getUnlockedBuildingIdsForHq,
   getUnlockedBuyModesForHq,
 } from "./base";
 import type { BuildingInstance, BuildingTypeId, Plot } from "./base";
@@ -22,17 +24,32 @@ import {
 } from "./upgrades";
 import type { BusinessCounts, UpgradeDef } from "./upgrades";
 import {
+  getAvailableProjects,
   getProjectAutoRunAll,
   getProjectCost,
   getProjectGlobalProfitMult,
   getProjectGlobalTimeMult,
   getProjectOfflineCapBonusSeconds,
   getProjectSlots,
+  isProjectUnlocked,
   PROJECT_BY_ID,
 } from "./projects";
 import type { ProjectRun } from "./projects";
 import { buildGoalPool, getGoalProgress, pickRandomGoals } from "./goals";
-import type { GoalState } from "./goals";
+import type { GoalContext, GoalState } from "./goals";
+import {
+  clampNumber,
+  createSeed,
+  getLeagueConfig,
+  getLeagueForTrophies,
+  pickFrom,
+  randomFloat,
+  sigmoid,
+  WAR_TARGET_NAMES,
+  WAR_TARGET_REFRESH_MS,
+} from "./war";
+import type { RaidEvent, WarState, WarTarget } from "./war";
+import { getWarUpgradeCost, WAR_UPGRADE_BY_ID } from "./upgrades_war";
 
 export type BuyMode = "x1" | "x10" | "x100" | "max";
 
@@ -85,11 +102,13 @@ type GameState = {
   safeCash: number;
   totalEarned: number;
   workTaps: number;
+  bulkBuys: number;
   buyMode: BuyMode;
   businesses: Record<BusinessId, BusinessCoreState>;
   world: WorldState;
   buildings: Record<string, BuildingInstance>;
   buildQueue: BuildQueueState;
+  war: WarState;
   purchasedUpgrades: string[];
   upgradeOffers: string[];
   lastOfferRefreshAt: number;
@@ -117,12 +136,16 @@ type GameActions = {
   withdrawSafe: (amount: number) => void;
   buyUpgrade: (id: string) => void;
   startProject: (id: string) => void;
+  buyWarUpgrade: (id: string) => void;
+  refreshWarTargets: (force?: boolean) => void;
+  attackWarTarget: (id: string) => void;
   processBusinessCycles: (now: number) => void;
   processBuildQueue: (now: number) => void;
   processProjectCompletions: (now: number) => void;
   processUpgradeOffers: (now: number) => void;
   processRiskEvents: (now: number) => void;
   processGoals: (now: number) => void;
+  processWarTick: (now: number) => void;
   syncOfflineProgress: (now: number) => void;
   markSeen: (now: number) => void;
 };
@@ -148,6 +171,9 @@ type GameSelectors = {
   getBuildingUpgradeTimeSec: (id: string) => number;
   getBuildQueueSlots: () => number;
   getUnlockedBuyModes: () => BuyMode[];
+  getWarOffensePower: () => number;
+  getWarDefensePower: () => number;
+  getWarVaultProtectPct: () => number;
   getTheftThreshold: () => number;
   getTheftRisk: () => boolean;
   getAvailableUpgrades: () => UpgradeDef[];
@@ -162,11 +188,13 @@ type PersistedState = Pick<
   | "safeCash"
   | "totalEarned"
   | "workTaps"
+  | "bulkBuys"
   | "buyMode"
   | "businesses"
   | "world"
   | "buildings"
   | "buildQueue"
+  | "war"
   | "purchasedUpgrades"
   | "projectsStarted"
   | "completedProjects"
@@ -192,6 +220,11 @@ const THEFT_MAX_PCT = 0.12;
 const THEFT_BASE_THRESHOLD = 50;
 const THEFT_THRESHOLD_SECONDS = 90;
 const GOAL_SLOTS = 3;
+const WAR_ATTACK_COOLDOWN_MS = 2 * 60 * 1000;
+const WAR_SHIELD_MS = 15 * 60 * 1000;
+const WAR_RAID_TROPHY_THRESHOLD = 20;
+const WAR_MAX_LOOT_MINUTES = 10;
+const WAR_MAX_LOSS_MINUTES = 6;
 
 const MILESTONES: MilestoneInfo[] = [
   { count: 10, mult: 2 },
@@ -247,6 +280,29 @@ const createDefaultBuildings = (): Record<string, BuildingInstance> => ({
     upgradingUntil: null,
   },
 });
+
+const createDefaultWarState = (now: number): WarState => {
+  const seed = createSeed();
+  const league = getLeagueForTrophies(0);
+  const config = getLeagueConfig(league);
+  const raidDelayMs =
+    (config.raidMinMinutes +
+      (config.raidMaxMinutes - config.raidMinMinutes) * 0.5) *
+    60 *
+    1000;
+  return {
+    trophies: 0,
+    league,
+    shieldUntil: null,
+    attackCooldownUntil: null,
+    targets: [],
+    lastTargetsAt: 0,
+    raidLog: [],
+    rngSeed: seed,
+    nextRaidAt: now + raidDelayMs,
+    warUpgrades: [],
+  };
+};
 
 const normalizeWorld = (value: unknown): WorldState => {
   if (!value || typeof value !== "object") {
@@ -345,6 +401,132 @@ const normalizeBuildQueue = (value: unknown): BuildQueueState => {
     })
     .filter((entry): entry is BuildQueueItem => Boolean(entry));
   return { active };
+};
+
+const normalizeWarState = (value: unknown, now: number): WarState => {
+  const fallback = createDefaultWarState(now);
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+  const raw = value as Record<string, unknown>;
+  const trophies =
+    typeof raw.trophies === "number" && Number.isFinite(raw.trophies)
+      ? Math.max(0, Math.floor(raw.trophies))
+      : 0;
+  const league = getLeagueForTrophies(trophies);
+  const shieldUntil =
+    typeof raw.shieldUntil === "number" && Number.isFinite(raw.shieldUntil)
+      ? raw.shieldUntil
+      : null;
+  const attackCooldownUntil =
+    typeof raw.attackCooldownUntil === "number" && Number.isFinite(raw.attackCooldownUntil)
+      ? raw.attackCooldownUntil
+      : null;
+  const targets = Array.isArray(raw.targets)
+    ? raw.targets
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return null;
+          }
+          const target = entry as Record<string, unknown>;
+          if (typeof target.id !== "string" || typeof target.name !== "string") {
+            return null;
+          }
+          const defense =
+            typeof target.defense === "number" && Number.isFinite(target.defense)
+              ? target.defense
+              : 0;
+          const loot =
+            typeof target.loot === "number" && Number.isFinite(target.loot) ? target.loot : 0;
+          const trophyWin =
+            typeof target.trophyWin === "number" && Number.isFinite(target.trophyWin)
+              ? target.trophyWin
+              : 0;
+          const trophyLoss =
+            typeof target.trophyLoss === "number" && Number.isFinite(target.trophyLoss)
+              ? target.trophyLoss
+              : 0;
+          const difficulty =
+            target.difficulty === "easy" ||
+            target.difficulty === "medium" ||
+            target.difficulty === "hard"
+              ? target.difficulty
+              : "easy";
+          return {
+            id: target.id,
+            name: target.name,
+            defense,
+            loot,
+            trophyWin,
+            trophyLoss,
+            difficulty,
+          } as WarTarget;
+        })
+        .filter((entry): entry is WarTarget => Boolean(entry))
+    : [];
+  const lastTargetsAt =
+    typeof raw.lastTargetsAt === "number" && Number.isFinite(raw.lastTargetsAt)
+      ? raw.lastTargetsAt
+      : 0;
+  const raidLog = Array.isArray(raw.raidLog)
+    ? raw.raidLog
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return null;
+          }
+          const item = entry as Record<string, unknown>;
+          if (
+            typeof item.id !== "string" ||
+            (item.kind !== "attack" && item.kind !== "defense") ||
+            (item.result !== "win" && item.result !== "loss")
+          ) {
+            return null;
+          }
+          const loot =
+            typeof item.loot === "number" && Number.isFinite(item.loot) ? item.loot : 0;
+          const trophiesDelta =
+            typeof item.trophiesDelta === "number" && Number.isFinite(item.trophiesDelta)
+              ? item.trophiesDelta
+              : 0;
+          const at =
+            typeof item.at === "number" && Number.isFinite(item.at) ? item.at : now;
+          const targetName = typeof item.targetName === "string" ? item.targetName : undefined;
+          return {
+            id: item.id,
+            kind: item.kind,
+            result: item.result,
+            loot,
+            trophiesDelta,
+            at,
+            targetName,
+          } as RaidEvent;
+        })
+        .filter((entry): entry is RaidEvent => Boolean(entry))
+    : [];
+  const rngSeed =
+    typeof raw.rngSeed === "number" && Number.isFinite(raw.rngSeed)
+      ? Math.floor(raw.rngSeed)
+      : createSeed();
+  const nextRaidAt =
+    typeof raw.nextRaidAt === "number" && Number.isFinite(raw.nextRaidAt)
+      ? raw.nextRaidAt
+      : now + getLeagueConfig(league).raidMinMinutes * 60 * 1000;
+  const warUpgrades = Array.isArray(raw.warUpgrades)
+    ? raw.warUpgrades.filter((id) => typeof id === "string" && WAR_UPGRADE_BY_ID[id])
+    : [];
+
+  return {
+    trophies,
+    league,
+    shieldUntil,
+    attackCooldownUntil,
+    targets,
+    lastTargetsAt,
+    raidLog,
+    rngSeed,
+    nextRaidAt,
+    warUpgrades,
+  };
 };
 
 const ensurePlotsForHqLevel = (world: WorldState, hqLevel: number): WorldState => {
@@ -453,6 +635,8 @@ const normalizeUpgrades = (value: unknown) => {
   }
   return value.filter((entry) => typeof entry === "string");
 };
+
+const normalizeBulkBuys = (value: unknown) => clampToInt(value, 0);
 
 const normalizeProjectsStarted = (value: unknown) => clampToInt(value, 0);
 
@@ -658,8 +842,8 @@ const isBusinessUnlocked = (state: GameState, id: BusinessId) => {
   if (getBuildingForBusiness(state, id)) {
     return true;
   }
-  const unlockAt = BUSINESS_BY_ID[id].unlockAtTotalEarned ?? 0;
-  return state.totalEarned >= unlockAt;
+  const business = state.businesses[id];
+  return Boolean(business && business.count > 0);
 };
 
 const getProjectSlotsForState = () => getProjectSlots();
@@ -706,6 +890,184 @@ const getProjectDurationMsForState = (state: GameState, baseDurationMs: number) 
 const getUnlockedBusinessIds = (state: GameState): BusinessId[] =>
   BUSINESS_DEFS.filter((def) => isBusinessUnlocked(state, def.id)).map((def) => def.id);
 
+const getGoalContextForState = (state: GameState): GoalContext => {
+  const counts = getBusinessCounts(state);
+  const managersOwned = BUSINESS_DEFS.reduce((acc, def) => {
+    acc[def.id] = Boolean(state.businesses[def.id]?.managerOwned);
+    return acc;
+  }, {} as Record<BusinessId, boolean>);
+  const buildingLevels = Object.values(state.buildings).reduce((acc, building) => {
+    const current = acc[building.typeId] ?? 0;
+    acc[building.typeId] = Math.max(current, building.buildingLevel);
+    return acc;
+  }, {} as Record<BuildingTypeId, number>);
+  const buildingsBuiltCount = Object.values(state.buildings).filter(
+    (building) => building.typeId !== "hq"
+  ).length;
+  const hqLevel = getHqLevelForState(state);
+  const nextHq = getHqConfig(hqLevel + 1);
+  const hqTargetLevel = nextHq.level > hqLevel ? nextHq.level : null;
+  const unlockedBuildingTypes = getUnlockedBuildingIdsForHq(hqLevel);
+  const builtTypes = new Set(Object.values(state.buildings).map((building) => building.typeId));
+  const emptyPlots = state.world.plots.filter((plot) => !plot.buildingId).length;
+  const unbuiltBuildingTypes =
+    emptyPlots > 0
+      ? unlockedBuildingTypes.filter(
+          (typeId) => typeId !== "hq" && !builtTypes.has(typeId)
+        )
+      : [];
+  const bulkBuyUnlocked = getUnlockedBuyModesForState(state).some(
+    (mode) => mode === "x10" || mode === "x100" || mode === "max"
+  );
+  const availableProjects = getAvailableProjects(
+    state.completedProjects,
+    state.runningProjects,
+    state.totalEarned,
+    hqLevel
+  );
+  const canStartProject =
+    availableProjects.length > 0 && state.runningProjects.length < getProjectSlotsForState();
+
+  return {
+    counts,
+    managersOwned,
+    bulkBuys: state.bulkBuys,
+    purchasedUpgradesCount: state.purchasedUpgrades.length,
+    projectsStartedCount: state.projectsStarted,
+    buildingLevels,
+    buildingsBuiltCount,
+    hqLevel,
+    unbuiltBuildingTypes,
+    bulkBuyUnlocked,
+    hqTargetLevel,
+    canStartProject,
+  };
+};
+
+const getWarUpgradeBonuses = (state: GameState) => {
+  let offenseBonus = 0;
+  let defenseBonus = 0;
+  let vaultProtectPct = 0;
+  let lossMult = 1;
+  let lootMult = 1;
+  let attackCooldownMult = 1;
+
+  for (const id of state.war.warUpgrades) {
+    const upgrade = WAR_UPGRADE_BY_ID[id];
+    if (!upgrade) {
+      continue;
+    }
+    const effect = upgrade.effect;
+    if (effect.offenseBonus) {
+      offenseBonus += effect.offenseBonus;
+    }
+    if (effect.defenseBonus) {
+      defenseBonus += effect.defenseBonus;
+    }
+    if (effect.vaultProtectPct) {
+      vaultProtectPct += effect.vaultProtectPct;
+    }
+    if (effect.lossMult) {
+      lossMult *= effect.lossMult;
+    }
+    if (effect.lootMult) {
+      lootMult *= effect.lootMult;
+    }
+    if (effect.attackCooldownMult) {
+      attackCooldownMult *= effect.attackCooldownMult;
+    }
+  }
+
+  return {
+    offenseBonus,
+    defenseBonus,
+    vaultProtectPct: clampNumber(vaultProtectPct, 0, 0.9),
+    lossMult,
+    lootMult,
+    attackCooldownMult,
+  };
+};
+
+const getWarOffensePowerForState = (state: GameState) => {
+  const hqLevel = getHqLevelForState(state);
+  const sumBuildingLevels = Object.values(state.buildings).reduce(
+    (sum, building) => sum + building.buildingLevel,
+    0
+  );
+  const managersOwned = BUSINESS_DEFS.reduce(
+    (sum, def) => sum + (state.businesses[def.id]?.managerOwned ? 1 : 0),
+    0
+  );
+  const bonuses = getWarUpgradeBonuses(state);
+  return hqLevel * 10 + sumBuildingLevels * 2 + managersOwned * 5 + bonuses.offenseBonus;
+};
+
+const getWarDefensePowerForState = (state: GameState) => {
+  const hqLevel = getHqLevelForState(state);
+  const projectsCompleted = state.completedProjects.length;
+  const safeBonus = state.safeCash > 0 ? 20 : 0;
+  const bonuses = getWarUpgradeBonuses(state);
+  return hqLevel * 12 + safeBonus + projectsCompleted * 8 + bonuses.defenseBonus;
+};
+
+const getWarVaultProtectPctForState = (state: GameState) =>
+  getWarUpgradeBonuses(state).vaultProtectPct;
+
+const getWarAttackCooldownMsForState = (state: GameState) => {
+  const bonuses = getWarUpgradeBonuses(state);
+  return Math.max(30_000, WAR_ATTACK_COOLDOWN_MS * bonuses.attackCooldownMult);
+};
+
+const getWarLootMultForState = (state: GameState) => getWarUpgradeBonuses(state).lootMult;
+
+const getWarLossMultForState = (state: GameState) => getWarUpgradeBonuses(state).lossMult;
+
+const scheduleNextRaidAt = (seed: number, leagueConfig: ReturnType<typeof getLeagueConfig>) => {
+  const { value, next } = randomFloat(seed);
+  const minutes =
+    leagueConfig.raidMinMinutes +
+    (leagueConfig.raidMaxMinutes - leagueConfig.raidMinMinutes) * value;
+  return { nextAtMs: minutes * 60 * 1000, seed: next };
+};
+
+const generateWarTargets = (state: GameState, seed: number, now: number) => {
+  const defensePower = getWarDefensePowerForState(state);
+  const incomePerSec = getIncomePerSecTotalForState(state);
+  const difficulties: Array<{
+    difficulty: WarTarget["difficulty"];
+    defenseMult: number;
+    lootSeconds: number;
+    trophyWin: number;
+    trophyLoss: number;
+    lootVaultFactor: number;
+  }> = [
+    { difficulty: "easy", defenseMult: 0.8, lootSeconds: 60, trophyWin: 8, trophyLoss: 4, lootVaultFactor: 0.95 },
+    { difficulty: "medium", defenseMult: 1.0, lootSeconds: 180, trophyWin: 15, trophyLoss: 8, lootVaultFactor: 0.9 },
+    { difficulty: "hard", defenseMult: 1.2, lootSeconds: 480, trophyWin: 25, trophyLoss: 12, lootVaultFactor: 0.85 },
+  ];
+
+  let nextSeedValue = seed;
+  const targets: WarTarget[] = difficulties.map((entry, index) => {
+    const namePick = pickFrom(WAR_TARGET_NAMES, nextSeedValue);
+    nextSeedValue = namePick.next;
+    const { value: noise, next } = randomFloat(nextSeedValue);
+    nextSeedValue = next;
+    const defense = defensePower * entry.defenseMult + noise * 6;
+    const loot = incomePerSec * entry.lootSeconds * entry.lootVaultFactor;
+    return {
+      id: `target-${now}-${index}`,
+      name: namePick.item ?? "Rival Firm",
+      defense,
+      loot,
+      trophyWin: entry.trophyWin,
+      trophyLoss: entry.trophyLoss,
+      difficulty: entry.difficulty,
+    };
+  });
+
+  return { targets, seed: nextSeedValue };
+};
+
 const sampleUpgradeOffers = (available: UpgradeDef[], count: number) => {
   if (available.length <= count) {
     return available.map((upgrade) => upgrade.id);
@@ -737,21 +1099,11 @@ const ensureUpgradeOffers = (state: GameState, now: number) => {
 };
 
 const ensureGoals = (state: GameState) => {
-  const counts = getBusinessCounts(state);
-  const pool = buildGoalPool(
-    counts,
-    state.purchasedUpgrades.length,
-    state.projectsStarted,
-    getUnlockedBusinessIds(state)
-  );
+  const context = getGoalContextForState(state);
+  const pool = buildGoalPool(context, getUnlockedBusinessIds(state));
   const kept = state.activeGoals.filter(
     (goal) =>
-      !getGoalProgress(
-        goal,
-        counts,
-        state.purchasedUpgrades.length,
-        state.projectsStarted
-      ).complete
+      !getGoalProgress(goal, context).complete
   );
   if (kept.length >= GOAL_SLOTS) {
     return { ...state, activeGoals: kept.slice(0, GOAL_SLOTS) };
@@ -935,11 +1287,13 @@ const loadPersistedState = (): PersistedState => {
       safeCash: 0,
       totalEarned: 0,
       workTaps: 0,
+      bulkBuys: 0,
       buyMode: "x1",
       businesses: createDefaultBusinesses(),
       world: createDefaultWorld(),
       buildings: createDefaultBuildings(),
       buildQueue: { active: [] },
+      war: createDefaultWarState(Date.now()),
       purchasedUpgrades: [],
       projectsStarted: 0,
       completedProjects: [],
@@ -956,11 +1310,13 @@ const loadPersistedState = (): PersistedState => {
         safeCash: 0,
         totalEarned: 0,
         workTaps: 0,
+        bulkBuys: 0,
         buyMode: "x1",
         businesses: createDefaultBusinesses(),
         world: createDefaultWorld(),
         buildings: createDefaultBuildings(),
         buildQueue: { active: [] },
+        war: createDefaultWarState(Date.now()),
         purchasedUpgrades: [],
         projectsStarted: 0,
         completedProjects: [],
@@ -989,11 +1345,13 @@ const loadPersistedState = (): PersistedState => {
       safeCash,
       totalEarned,
       workTaps,
+      bulkBuys: normalizeBulkBuys(data.bulkBuys),
       buyMode: normalizeBuyMode(data.buyMode),
       businesses: normalizeBusinesses(data.businesses),
       world,
       buildings,
       buildQueue: normalizeBuildQueue(data.buildQueue),
+      war: normalizeWarState(data.war, Date.now()),
       purchasedUpgrades: normalizeUpgrades(data.purchasedUpgrades),
       projectsStarted: normalizeProjectsStarted(data.projectsStarted),
       completedProjects: normalizeCompletedProjects(data.completedProjects),
@@ -1009,11 +1367,13 @@ const loadPersistedState = (): PersistedState => {
       safeCash: 0,
       totalEarned: 0,
       workTaps: 0,
+      bulkBuys: 0,
       buyMode: "x1",
       businesses: createDefaultBusinesses(),
       world: createDefaultWorld(),
       buildings: createDefaultBuildings(),
       buildQueue: { active: [] },
+      war: createDefaultWarState(Date.now()),
       purchasedUpgrades: [],
       projectsStarted: 0,
       completedProjects: [],
@@ -1056,6 +1416,43 @@ const createInitialState = () => {
         buildQueue: { active: filtered },
       };
     }
+  }
+
+  const currentLeague = getLeagueForTrophies(baseState.war.trophies);
+  if (baseState.war.league !== currentLeague) {
+    baseState = {
+      ...baseState,
+      war: {
+        ...baseState.war,
+        league: currentLeague,
+      },
+    };
+  }
+
+  if (!Number.isFinite(baseState.war.nextRaidAt) || baseState.war.nextRaidAt <= 0) {
+    const config = getLeagueConfig(currentLeague);
+    const schedule = scheduleNextRaidAt(baseState.war.rngSeed, config);
+    baseState = {
+      ...baseState,
+      war: {
+        ...baseState.war,
+        rngSeed: schedule.seed,
+        nextRaidAt: now + schedule.nextAtMs,
+      },
+    };
+  }
+
+  if (baseState.war.targets.length === 0) {
+    const generated = generateWarTargets(baseState, baseState.war.rngSeed, now);
+    baseState = {
+      ...baseState,
+      war: {
+        ...baseState.war,
+        targets: generated.targets,
+        lastTargetsAt: now,
+        rngSeed: generated.seed,
+      },
+    };
   }
 
   const withOffline = applyOfflineProgress(baseState, now);
@@ -1210,6 +1607,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     set({
       cash: state.cash - buyInfo.cost,
       businesses: nextBusinesses,
+      bulkBuys: state.bulkBuys + (buyInfo.quantity >= 10 ? 1 : 0),
     });
   },
   runBusiness: (id) => {
@@ -1351,9 +1749,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     if (state.completedProjects.includes(id)) {
       return;
     }
-    if (!project.unlock || state.totalEarned >= (project.unlock.totalEarnedAtLeast ?? 0)) {
-      // ok
-    } else {
+    if (!isProjectUnlocked(project, state.totalEarned, getHqLevelForState(state))) {
       return;
     }
     if (state.runningProjects.some((run) => run.id === id)) {
@@ -1382,6 +1778,224 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         },
       ],
     });
+  },
+  buyWarUpgrade: (id) => {
+    const state = get();
+    const upgrade = WAR_UPGRADE_BY_ID[id];
+    if (!upgrade || state.war.warUpgrades.includes(id)) {
+      return;
+    }
+    const incomePerSec = getIncomePerSecTotalForState(state);
+    const cost = getWarUpgradeCost(incomePerSec, upgrade);
+    if (cost <= 0 || state.cash < cost) {
+      return;
+    }
+    set({
+      cash: state.cash - cost,
+      war: {
+        ...state.war,
+        warUpgrades: [...state.war.warUpgrades, id],
+      },
+    });
+  },
+  refreshWarTargets: (force = false) => {
+    const state = get();
+    const now = Date.now();
+    if (
+      !force &&
+      state.war.targets.length > 0 &&
+      now - state.war.lastTargetsAt < WAR_TARGET_REFRESH_MS
+    ) {
+      return;
+    }
+    const generated = generateWarTargets(state, state.war.rngSeed, now);
+    set({
+      war: {
+        ...state.war,
+        targets: generated.targets,
+        lastTargetsAt: now,
+        rngSeed: generated.seed,
+      },
+    });
+  },
+  attackWarTarget: (id) => {
+    const state = get();
+    const now = Date.now();
+    if (state.war.attackCooldownUntil && now < state.war.attackCooldownUntil) {
+      return;
+    }
+    const target = state.war.targets.find((entry) => entry.id === id);
+    if (!target) {
+      return;
+    }
+    const offense = getWarOffensePowerForState(state);
+    const defense = target.defense;
+    const leagueConfig = getLeagueConfig(state.war.league);
+    let seed = state.war.rngSeed;
+    const roll = randomFloat(seed);
+    seed = roll.next;
+    const pWin = sigmoid((offense - defense) / 20);
+    const win = roll.value < pWin;
+    let cash = state.cash;
+    let totalEarned = state.totalEarned;
+    let loot = 0;
+    let trophiesDelta = 0;
+
+    if (win) {
+      const lootMult = getWarLootMultForState(state);
+      const maxLoot = getIncomePerSecTotalForState(state) *
+        Math.min(WAR_MAX_LOOT_MINUTES, leagueConfig.attackLootCapMinutes) *
+        60;
+      loot = Math.min(target.loot * lootMult, maxLoot);
+      cash += loot;
+      totalEarned += loot;
+      trophiesDelta = target.trophyWin;
+    } else {
+      const repairCost = getIncomePerSecTotalForState(state) * 30;
+      cash = Math.max(0, cash - repairCost);
+      trophiesDelta = -target.trophyLoss;
+    }
+
+    const nextTrophies = Math.max(0, state.war.trophies + trophiesDelta);
+    const nextLeague = getLeagueForTrophies(nextTrophies);
+    const cooldownMs = getWarAttackCooldownMsForState(state);
+    const raidLog: RaidEvent = {
+      id: `attack-${now}-${target.id}`,
+      kind: "attack",
+      result: win ? "win" : "loss",
+      loot,
+      trophiesDelta,
+      at: now,
+      targetName: target.name,
+    };
+
+    const generated = generateWarTargets(state, seed, now);
+    set({
+      cash,
+      totalEarned,
+      war: {
+        ...state.war,
+        trophies: nextTrophies,
+        league: nextLeague,
+        attackCooldownUntil: now + cooldownMs,
+        raidLog: [raidLog, ...state.war.raidLog].slice(0, 10),
+        rngSeed: generated.seed,
+        targets: generated.targets,
+        lastTargetsAt: now,
+      },
+    });
+  },
+  processWarTick: (now) => {
+    const state = get();
+    let war = state.war;
+    let cash = state.cash;
+    let changed = false;
+    let seed = war.rngSeed;
+
+    const shouldRefreshTargets =
+      war.targets.length === 0 || now - war.lastTargetsAt >= WAR_TARGET_REFRESH_MS;
+    if (shouldRefreshTargets) {
+      const generated = generateWarTargets(state, seed, now);
+      seed = generated.seed;
+      war = {
+        ...war,
+        targets: generated.targets,
+        lastTargetsAt: now,
+      };
+      changed = true;
+    }
+
+    if (war.shieldUntil && war.shieldUntil <= now) {
+      war = { ...war, shieldUntil: null };
+      changed = true;
+    }
+
+    if (war.shieldUntil && war.nextRaidAt <= war.shieldUntil) {
+      const config = getLeagueConfig(war.league);
+      const schedule = scheduleNextRaidAt(seed, config);
+      seed = schedule.seed;
+      war = {
+        ...war,
+        nextRaidAt: war.shieldUntil + schedule.nextAtMs,
+      };
+      changed = true;
+    }
+
+    if (now >= war.nextRaidAt && war.trophies >= WAR_RAID_TROPHY_THRESHOLD && !war.shieldUntil) {
+      const leagueConfig = getLeagueConfig(war.league);
+      const offenseBase = getWarOffensePowerForState(state);
+      const defensePower = getWarDefensePowerForState(state);
+      const rollOffense = randomFloat(seed);
+      seed = rollOffense.next;
+      const attackerOffense = offenseBase * (0.8 + rollOffense.value * 0.5);
+      const pDefend = sigmoid((defensePower - attackerOffense) / 20);
+      const rollResult = randomFloat(seed);
+      seed = rollResult.next;
+      const defended = rollResult.value < pDefend;
+      let loss = 0;
+      let trophiesDelta = defended ? 2 : -4;
+
+      if (!defended) {
+        const incomePerSec = getIncomePerSecTotalForState(state);
+        const capMinutes = Math.min(
+          WAR_MAX_LOSS_MINUTES,
+          leagueConfig.defenseLossCapMinutes
+        );
+        const vaultProtect = getWarVaultProtectPctForState(state);
+        const lootableCash = Math.max(0, cash * (1 - vaultProtect));
+        const rollLoss = randomFloat(seed);
+        seed = rollLoss.next;
+        const stealPct = 0.5 + rollLoss.value * 0.5;
+        const maxLoss = incomePerSec * capMinutes * 60;
+        const lossMult = getWarLossMultForState(state);
+        loss = Math.min(lootableCash, maxLoss * stealPct * lossMult);
+        cash = Math.max(0, cash - loss);
+      }
+
+      const schedule = scheduleNextRaidAt(seed, leagueConfig);
+      seed = schedule.seed;
+      const nextTrophies = Math.max(0, war.trophies + trophiesDelta);
+      const nextLeague = getLeagueForTrophies(nextTrophies);
+      const raidLog: RaidEvent = {
+        id: `defense-${now}`,
+        kind: "defense",
+        result: defended ? "win" : "loss",
+        loot: loss,
+        trophiesDelta,
+        at: now,
+      };
+
+      war = {
+        ...war,
+        trophies: nextTrophies,
+        league: nextLeague,
+        shieldUntil: now + WAR_SHIELD_MS,
+        nextRaidAt: now + WAR_SHIELD_MS + schedule.nextAtMs,
+        raidLog: [raidLog, ...war.raidLog].slice(0, 10),
+      };
+      changed = true;
+    } else if (now >= war.nextRaidAt && war.trophies < WAR_RAID_TROPHY_THRESHOLD) {
+      const config = getLeagueConfig(war.league);
+      const schedule = scheduleNextRaidAt(seed, config);
+      seed = schedule.seed;
+      war = {
+        ...war,
+        nextRaidAt: now + schedule.nextAtMs,
+      };
+      changed = true;
+    }
+
+    if (seed !== war.rngSeed) {
+      war = { ...war, rngSeed: seed };
+      changed = true;
+    }
+
+    if (changed || cash !== state.cash) {
+      set({
+        cash,
+        war,
+      });
+    }
   },
   processBusinessCycles: (now) => {
     const state = get();
@@ -1620,9 +2234,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
   processGoals: (now) => {
     const state = get();
-    const counts = getBusinessCounts(state);
-    const purchasedCount = state.purchasedUpgrades.length;
-    const projectsStarted = state.projectsStarted;
+    const context = getGoalContextForState(state);
     let activeBuffs = pruneExpiredBuffs(state.activeBuffs, now);
     let buffsChanged = activeBuffs.length !== state.activeBuffs.length;
     let runningProjects = state.runningProjects;
@@ -1630,7 +2242,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     let goalsChanged = false;
 
     for (const goal of state.activeGoals) {
-      const progress = getGoalProgress(goal, counts, purchasedCount, projectsStarted);
+      const progress = getGoalProgress(goal, context);
       if (!progress.complete) {
         activeGoals.push(goal);
         continue;
@@ -1679,12 +2291,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     }
 
     if (activeGoals.length < GOAL_SLOTS) {
-      const pool = buildGoalPool(
-        counts,
-        purchasedCount,
-        projectsStarted,
-        getUnlockedBusinessIds(state)
-      );
+      const pool = buildGoalPool(context, getUnlockedBusinessIds(state));
       const newGoals = pickRandomGoals(
         pool,
         GOAL_SLOTS - activeGoals.length,
@@ -1790,6 +2397,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
   getBuildQueueSlots: () => getQueueSlotsForHq(getHqLevelForState(get())),
   getUnlockedBuyModes: () => getUnlockedBuyModesForState(get()),
+  getWarOffensePower: () => getWarOffensePowerForState(get()),
+  getWarDefensePower: () => getWarDefensePowerForState(get()),
+  getWarVaultProtectPct: () => getWarVaultProtectPctForState(get()),
   getTheftThreshold: () => getTheftThresholdForState(get()),
   getTheftRisk: () => get().cash > getTheftThresholdForState(get()),
   getAvailableUpgrades: () =>
@@ -1806,11 +2416,13 @@ const selectPersistedState = (state: GameState): PersistedState => ({
   safeCash: state.safeCash,
   totalEarned: state.totalEarned,
   workTaps: state.workTaps,
+  bulkBuys: state.bulkBuys,
   buyMode: state.buyMode,
   businesses: state.businesses,
   world: state.world,
   buildings: state.buildings,
   buildQueue: state.buildQueue,
+  war: state.war,
   purchasedUpgrades: state.purchasedUpgrades,
   projectsStarted: state.projectsStarted,
   completedProjects: state.completedProjects,

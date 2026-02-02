@@ -7,6 +7,7 @@ export type ProjectEffect = {
 
 export type ProjectUnlock = {
   totalEarnedAtLeast?: number;
+  hqLevelAtLeast?: number;
 };
 
 export type ProjectDef = {
@@ -61,7 +62,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
     durationMs: 25 * 60 * 1000,
     targetSeconds: 25 * 60,
     effect: { autoRunAll: true },
-    unlock: { totalEarnedAtLeast: 15000 },
+    unlock: { totalEarnedAtLeast: 15000, hqLevelAtLeast: 3 },
   },
   {
     id: "profit-boost-50",
@@ -70,7 +71,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
     durationMs: 30 * 60 * 1000,
     targetSeconds: 30 * 60,
     effect: { globalProfitMult: 1.5 },
-    unlock: { totalEarnedAtLeast: 10000 },
+    unlock: { totalEarnedAtLeast: 10000, hqLevelAtLeast: 3 },
   },
   {
     id: "offline-cap-4h",
@@ -79,7 +80,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
     durationMs: 35 * 60 * 1000,
     targetSeconds: 40 * 60,
     effect: { offlineCapSecondsAdd: 4 * 60 * 60 },
-    unlock: { totalEarnedAtLeast: 20000 },
+    unlock: { totalEarnedAtLeast: 20000, hqLevelAtLeast: 3 },
   },
   {
     id: "cycle-overclock",
@@ -88,7 +89,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
     durationMs: 45 * 60 * 1000,
     targetSeconds: 45 * 60,
     effect: { globalTimeMult: 0.85 },
-    unlock: { totalEarnedAtLeast: 50000 },
+    unlock: { totalEarnedAtLeast: 50000, hqLevelAtLeast: 3 },
   },
   {
     id: "offline-cap-8h",
@@ -97,7 +98,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
     durationMs: 60 * 60 * 1000,
     targetSeconds: 60 * 60,
     effect: { offlineCapSecondsAdd: 8 * 60 * 60 },
-    unlock: { totalEarnedAtLeast: 250000 },
+    unlock: { totalEarnedAtLeast: 250000, hqLevelAtLeast: 3 },
   },
   {
     id: "profit-boost-100",
@@ -106,7 +107,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
     durationMs: 90 * 60 * 1000,
     targetSeconds: 90 * 60,
     effect: { globalProfitMult: 2.0 },
-    unlock: { totalEarnedAtLeast: 1000000 },
+    unlock: { totalEarnedAtLeast: 1000000, hqLevelAtLeast: 3 },
   },
   {
     id: "cycle-mastery",
@@ -115,7 +116,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
     durationMs: 120 * 60 * 1000,
     targetSeconds: 120 * 60,
     effect: { globalTimeMult: 0.75 },
-    unlock: { totalEarnedAtLeast: 5000000 },
+    unlock: { totalEarnedAtLeast: 5000000, hqLevelAtLeast: 3 },
   },
 ];
 
@@ -158,21 +159,27 @@ export const getProjectGlobalTimeMult = (completedProjects: string[]) =>
 export const getProjectAutoRunAll = (completedProjects: string[]) =>
   completedProjects.some((id) => PROJECT_BY_ID[id]?.effect.autoRunAll);
 
-export const isProjectUnlocked = (project: ProjectDef, totalEarned: number) => {
+export const isProjectUnlocked = (
+  project: ProjectDef,
+  totalEarned: number,
+  hqLevel: number
+) => {
   const required = project.unlock?.totalEarnedAtLeast ?? 0;
-  return totalEarned >= required;
+  const hqRequired = project.unlock?.hqLevelAtLeast ?? 1;
+  return totalEarned >= required && hqLevel >= hqRequired;
 };
 
 export const getAvailableProjects = (
   completedProjects: string[],
   runningProjects: ProjectRun[],
-  totalEarned: number
+  totalEarned: number,
+  hqLevel: number
 ) => {
   const runningIds = new Set(runningProjects.map((run) => run.id));
   return PROJECT_DEFS.filter(
     (project) =>
       !completedProjects.includes(project.id) &&
       !runningIds.has(project.id) &&
-      isProjectUnlocked(project, totalEarned)
+      isProjectUnlocked(project, totalEarned, hqLevel)
   );
 };
