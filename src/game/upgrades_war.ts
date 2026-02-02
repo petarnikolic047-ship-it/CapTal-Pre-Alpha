@@ -7,6 +7,7 @@ export type WarUpgradeEffect = {
   lossMult?: number;
   lootMult?: number;
   attackCooldownMult?: number;
+  shieldDurationBonusSec?: number;
 };
 
 export type WarUpgradeDef = {
@@ -14,106 +15,65 @@ export type WarUpgradeDef = {
   name: string;
   description: string;
   kind: WarUpgradeKind;
-  targetSeconds: number;
-  effect: WarUpgradeEffect;
+  baseSeconds: number;
+  costGrowth: number;
+  effectPerLevel: WarUpgradeEffect;
 };
 
 export const WAR_UPGRADES: WarUpgradeDef[] = [
   {
-    id: "vault-1",
-    name: "Vault Reinforcement I",
-    description: "+10% cash protection during raids.",
+    id: "vault-reinforcement",
+    name: "Vault Reinforcement",
+    description: "+2% vault protection per level.",
     kind: "security",
-    targetSeconds: 5 * 60,
-    effect: { vaultProtectPct: 0.1, defenseBonus: 4 },
+    baseSeconds: 300,
+    costGrowth: 1.45,
+    effectPerLevel: { vaultProtectPct: 0.02 },
   },
   {
-    id: "vault-2",
-    name: "Vault Reinforcement II",
-    description: "+10% cash protection during raids.",
+    id: "fortification-protocol",
+    name: "Fortification Protocol",
+    description: "+6 defense per level.",
     kind: "security",
-    targetSeconds: 5 * 60,
-    effect: { vaultProtectPct: 0.1, defenseBonus: 4 },
+    baseSeconds: 300,
+    costGrowth: 1.5,
+    effectPerLevel: { defenseBonus: 6 },
   },
   {
-    id: "vault-3",
-    name: "Vault Reinforcement III",
-    description: "+10% cash protection during raids.",
+    id: "shield-extension",
+    name: "Shield Extension",
+    description: "+15s shield duration per level.",
     kind: "security",
-    targetSeconds: 15 * 60,
-    effect: { vaultProtectPct: 0.1, defenseBonus: 6 },
+    baseSeconds: 600,
+    costGrowth: 1.55,
+    effectPerLevel: { shieldDurationBonusSec: 15 },
   },
   {
-    id: "vault-4",
-    name: "Vault Reinforcement IV",
-    description: "+10% cash protection during raids.",
-    kind: "security",
-    targetSeconds: 15 * 60,
-    effect: { vaultProtectPct: 0.1, defenseBonus: 6 },
-  },
-  {
-    id: "vault-5",
-    name: "Vault Reinforcement V",
-    description: "+10% cash protection during raids.",
-    kind: "security",
-    targetSeconds: 45 * 60,
-    effect: { vaultProtectPct: 0.1, defenseBonus: 8 },
-  },
-  {
-    id: "firewall-grid",
-    name: "Firewall Grid",
-    description: "Reduce raid losses by 15%.",
-    kind: "security",
-    targetSeconds: 15 * 60,
-    effect: { lossMult: 0.85, defenseBonus: 10 },
-  },
-  {
-    id: "insurance-net",
-    name: "Insurance Net",
-    description: "Protect an additional 30% of cash.",
-    kind: "security",
-    targetSeconds: 45 * 60,
-    effect: { vaultProtectPct: 0.3, defenseBonus: 12 },
-  },
-  {
-    id: "acquisition-1",
-    name: "Acquisition Team I",
-    description: "+20 offense power.",
+    id: "acquisition-ops",
+    name: "Acquisition Ops",
+    description: "+6 offense per level.",
     kind: "war",
-    targetSeconds: 5 * 60,
-    effect: { offenseBonus: 20 },
+    baseSeconds: 300,
+    costGrowth: 1.5,
+    effectPerLevel: { offenseBonus: 6 },
   },
   {
-    id: "acquisition-2",
-    name: "Acquisition Team II",
-    description: "+45 offense power.",
+    id: "loot-optimization",
+    name: "Loot Optimization",
+    description: "+3% loot per level.",
     kind: "war",
-    targetSeconds: 15 * 60,
-    effect: { offenseBonus: 45 },
+    baseSeconds: 600,
+    costGrowth: 1.45,
+    effectPerLevel: { lootMult: 1.03 },
   },
   {
-    id: "acquisition-3",
-    name: "Acquisition Team III",
-    description: "+80 offense power.",
+    id: "rapid-strikes",
+    name: "Rapid Strikes",
+    description: "-3% raid cooldown per level.",
     kind: "war",
-    targetSeconds: 45 * 60,
-    effect: { offenseBonus: 80 },
-  },
-  {
-    id: "insider-intel",
-    name: "Insider Intel",
-    description: "+30 offense power and -15% cooldown.",
-    kind: "war",
-    targetSeconds: 15 * 60,
-    effect: { offenseBonus: 30, attackCooldownMult: 0.85 },
-  },
-  {
-    id: "logistics-lift",
-    name: "Logistics Lift",
-    description: "+10% raid loot.",
-    kind: "war",
-    targetSeconds: 45 * 60,
-    effect: { lootMult: 1.1 },
+    baseSeconds: 600,
+    costGrowth: 1.55,
+    effectPerLevel: { attackCooldownMult: 0.97 },
   },
 ];
 
@@ -121,5 +81,8 @@ export const WAR_UPGRADE_BY_ID: Record<string, WarUpgradeDef> = Object.fromEntri
   WAR_UPGRADES.map((upgrade) => [upgrade.id, upgrade])
 );
 
-export const getWarUpgradeCost = (incomePerSec: number, upgrade: WarUpgradeDef) =>
-  Math.max(0, incomePerSec * upgrade.targetSeconds);
+export const getWarUpgradeCost = (
+  incomePerSec: number,
+  upgrade: WarUpgradeDef,
+  level: number
+) => Math.max(0, incomePerSec * upgrade.baseSeconds * Math.pow(upgrade.costGrowth, level));

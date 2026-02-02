@@ -9,11 +9,11 @@ import {
   BUILDING_DEFS,
   getHqConfig,
   getUnlockedBuildingIdsForHq,
+  getUnlockedBuyModesForHq,
 } from "../../game/base";
 import type { BuildingInstance } from "../../game/base";
 import { formatDuration, formatMoney, formatMultiplier } from "../../game/format";
 import BuyModeToggle from "./BuyModeToggle";
-
 type BaseScreenProps = {
   now: number;
   buyMode: BuyMode;
@@ -25,8 +25,7 @@ const BaseScreen = ({ now, buyMode, cash }: BaseScreenProps) => {
   const buildings = useGameStore((state) => state.buildings);
   const buildQueue = useGameStore((state) => state.buildQueue);
   const setBuyMode = useGameStore((state) => state.setBuyMode);
-  const allowedBuyModes = useGameStore((state) => state.getUnlockedBuyModes());
-  const selectPlot = useGameStore((state) => state.selectPlot);
+    const selectPlot = useGameStore((state) => state.selectPlot);
   const placeBuilding = useGameStore((state) => state.placeBuilding);
   const startBuildingUpgrade = useGameStore((state) => state.startBuildingUpgrade);
   const buyBusiness = useGameStore((state) => state.buyBusiness);
@@ -44,6 +43,7 @@ const BaseScreen = ({ now, buyMode, cash }: BaseScreenProps) => {
   const getBuildingUpgradeTimeSec = useGameStore((state) => state.getBuildingUpgradeTimeSec);
 
   const hqLevel = buildings.hq?.buildingLevel ?? 1;
+  const allowedBuyModes = useMemo(() => getUnlockedBuyModesForHq(hqLevel), [hqLevel]);
   const unlockedBuildingIds = useMemo(
     () => getUnlockedBuildingIdsForHq(hqLevel),
     [hqLevel]
@@ -484,3 +484,8 @@ const BusinessPanel = ({
 };
 
 export default BaseScreen;
+
+
+
+
+

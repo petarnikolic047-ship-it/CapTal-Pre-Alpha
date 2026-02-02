@@ -1,13 +1,14 @@
-export type WarLeague = "bronze" | "silver" | "gold" | "plat";
+export type WarLeague = "bronze" | "silver" | "gold" | "diamond";
 
 export type WarTarget = {
   id: string;
   name: string;
   defense: number;
-  loot: number;
+  lootCap: number;
   trophyWin: number;
   trophyLoss: number;
   difficulty: "easy" | "medium" | "hard";
+  refreshAt: number;
 };
 
 export type RaidEvent = {
@@ -19,6 +20,24 @@ export type RaidEvent = {
   at: number;
   targetName?: string;
   report: BattleReport;
+};
+
+export type IncomingRaid = {
+  endsAt: number;
+  attackerOffense: number;
+  chance: number;
+  roll: number;
+  vaultProtectPct: number;
+  lootCap: number;
+  stealPct: number;
+};
+
+export type RaidReport = {
+  result: "win" | "loss";
+  lootLost: number;
+  protectedAmount: number;
+  trophiesDelta: number;
+  at: number;
 };
 
 export type BattleReport = {
@@ -43,12 +62,16 @@ export type WarState = {
   league: WarLeague;
   shieldUntil: number | null;
   attackCooldownUntil: number | null;
+  heatUntil: number | null;
   targets: WarTarget[];
   lastTargetsAt: number;
   raidLog: RaidEvent[];
   rngSeed: number;
   nextRaidAt: number;
-  warUpgrades: string[];
+  warUpgradeLevels: Record<string, number>;
+  incomingRaid: IncomingRaid | null;
+  raidReport: RaidReport | null;
+  unreadRaidReport: boolean;
 };
 
 export type WarLeagueConfig = {
@@ -86,7 +109,7 @@ export const WAR_LEAGUES: WarLeagueConfig[] = [
     raidMaxMinutes: 18,
   },
   {
-    id: "plat",
+    id: "diamond",
     minTrophies: 1000,
     attackLootCapMinutes: 14,
     defenseLossCapMinutes: 6,

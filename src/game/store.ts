@@ -47,8 +47,22 @@ import {
   WAR_TARGET_NAMES,
   WAR_TARGET_REFRESH_MS,
 } from "./war";
-import type { BattleReport, RaidEvent, WarState, WarTarget } from "./war";
+import type {
+  BattleReport,
+  IncomingRaid,
+  RaidEvent,
+  RaidReport,
+  WarState,
+  WarTarget,
+} from "./war";
 import { getWarUpgradeCost, WAR_UPGRADE_BY_ID } from "./upgrades_war";
+import {
+  defaultCooldowns,
+  generateTargets,
+  resolveRaid,
+  type PlayerWarState,
+  type WarTargetCard,
+} from "./warEngine";
 
 export type BuyMode = "x1" | "x10" | "x100" | "max";
 
@@ -330,12 +344,16 @@ const createDefaultWarState = (now: number): WarState => {
     league,
     shieldUntil: null,
     attackCooldownUntil: null,
+    heatUntil: null,
     targets: [],
     lastTargetsAt: 0,
     raidLog: [],
     rngSeed: seed,
     nextRaidAt: now + raidDelayMs,
-    warUpgrades: [],
+    warUpgradeLevels: {},
+    incomingRaid: null,
+    raidReport: null,
+    unreadRaidReport: false,
   };
 };
 
@@ -457,6 +475,10 @@ const normalizeWarState = (value: unknown, now: number): WarState => {
     typeof raw.attackCooldownUntil === "number" && Number.isFinite(raw.attackCooldownUntil)
       ? raw.attackCooldownUntil
       : null;
+  const heatUntil =
+    typeof raw.heatUntil === "number" && Number.isFinite(raw.heatUntil)
+      ? raw.heatUntil
+      : null;
   const targets = Array.isArray(raw.targets)
     ? raw.targets
         .map((entry) => {
@@ -471,8 +493,12 @@ const normalizeWarState = (value: unknown, now: number): WarState => {
             typeof target.defense === "number" && Number.isFinite(target.defense)
               ? target.defense
               : 0;
-          const loot =
-            typeof target.loot === "number" && Number.isFinite(target.loot) ? target.loot : 0;
+          const lootCap =
+            typeof target.lootCap === "number" && Number.isFinite(target.lootCap)
+              ? target.lootCap
+              : typeof target.loot === "number" && Number.isFinite(target.loot)
+              ? target.loot
+              : 0;
           const trophyWin =
             typeof target.trophyWin === "number" && Number.isFinite(target.trophyWin)
               ? target.trophyWin
@@ -487,14 +513,19 @@ const normalizeWarState = (value: unknown, now: number): WarState => {
             target.difficulty === "hard"
               ? target.difficulty
               : "easy";
+          const refreshAt =
+            typeof target.refreshAt === "number" && Number.isFinite(target.refreshAt)
+              ? target.refreshAt
+              : now;
           return {
             id: target.id,
             name: target.name,
             defense,
-            loot,
+            lootCap,
             trophyWin,
             trophyLoss,
             difficulty,
+            refreshAt,
           } as WarTarget;
         })
         .filter((entry): entry is WarTarget => Boolean(entry))
@@ -616,21 +647,100 @@ const normalizeWarState = (value: unknown, now: number): WarState => {
     typeof raw.nextRaidAt === "number" && Number.isFinite(raw.nextRaidAt)
       ? raw.nextRaidAt
       : now + getLeagueConfig(league).raidMinMinutes * 60 * 1000;
-  const warUpgrades = Array.isArray(raw.warUpgrades)
-    ? raw.warUpgrades.filter((id) => typeof id === "string" && WAR_UPGRADE_BY_ID[id])
-    : [];
+  const warUpgradeLevels: Record<string, number> = {};
+  if (raw.warUpgradeLevels && typeof raw.warUpgradeLevels === "object") {
+    for (const [id, value] of Object.entries(raw.warUpgradeLevels)) {
+      if (!WAR_UPGRADE_BY_ID[id]) {
+        continue;
+      }
+      const level =
+        typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+      if (level > 0) {
+        warUpgradeLevels[id] = level;
+      }
+    }
+  } else if (Array.isArray(raw.warUpgrades)) {
+    for (const id of raw.warUpgrades) {
+      if (typeof id === "string" && WAR_UPGRADE_BY_ID[id]) {
+        warUpgradeLevels[id] = (warUpgradeLevels[id] ?? 0) + 1;
+      }
+    }
+  }
+
+  const incomingRaid =
+    raw.incomingRaid && typeof raw.incomingRaid === "object"
+      ? ({
+          endsAt:
+            typeof (raw.incomingRaid as IncomingRaid).endsAt === "number"
+              ? (raw.incomingRaid as IncomingRaid).endsAt
+              : now,
+          attackerOffense:
+            typeof (raw.incomingRaid as IncomingRaid).attackerOffense === "number"
+              ? (raw.incomingRaid as IncomingRaid).attackerOffense
+              : 0,
+          chance:
+            typeof (raw.incomingRaid as IncomingRaid).chance === "number"
+              ? (raw.incomingRaid as IncomingRaid).chance
+              : 0,
+          roll:
+            typeof (raw.incomingRaid as IncomingRaid).roll === "number"
+              ? (raw.incomingRaid as IncomingRaid).roll
+              : 0,
+          vaultProtectPct:
+            typeof (raw.incomingRaid as IncomingRaid).vaultProtectPct === "number"
+              ? (raw.incomingRaid as IncomingRaid).vaultProtectPct
+              : 0,
+          lootCap:
+            typeof (raw.incomingRaid as IncomingRaid).lootCap === "number"
+              ? (raw.incomingRaid as IncomingRaid).lootCap
+              : 0,
+          stealPct:
+            typeof (raw.incomingRaid as IncomingRaid).stealPct === "number"
+              ? (raw.incomingRaid as IncomingRaid).stealPct
+              : 0,
+        } as IncomingRaid)
+      : null;
+
+  const raidReport =
+    raw.raidReport && typeof raw.raidReport === "object"
+      ? ({
+          result: (raw.raidReport as RaidReport).result === "win" ? "win" : "loss",
+          lootLost:
+            typeof (raw.raidReport as RaidReport).lootLost === "number"
+              ? (raw.raidReport as RaidReport).lootLost
+              : 0,
+          protectedAmount:
+            typeof (raw.raidReport as RaidReport).protectedAmount === "number"
+              ? (raw.raidReport as RaidReport).protectedAmount
+              : 0,
+          trophiesDelta:
+            typeof (raw.raidReport as RaidReport).trophiesDelta === "number"
+              ? (raw.raidReport as RaidReport).trophiesDelta
+              : 0,
+          at:
+            typeof (raw.raidReport as RaidReport).at === "number"
+              ? (raw.raidReport as RaidReport).at
+              : now,
+        } as RaidReport)
+      : null;
+  const unreadRaidReport =
+    typeof raw.unreadRaidReport === "boolean" ? raw.unreadRaidReport : Boolean(raidReport);
 
   return {
     trophies,
     league,
     shieldUntil,
     attackCooldownUntil,
+    heatUntil,
     targets,
     lastTargetsAt,
     raidLog,
     rngSeed,
     nextRaidAt,
-    warUpgrades,
+    warUpgradeLevels,
+    incomingRaid,
+    raidReport,
+    unreadRaidReport,
   };
 };
 
@@ -1056,30 +1166,34 @@ const getWarUpgradeBonuses = (state: GameState) => {
   let lossMult = 1;
   let lootMult = 1;
   let attackCooldownMult = 1;
+  let shieldDurationBonusSec = 0;
 
-  for (const id of state.war.warUpgrades) {
+  for (const [id, level] of Object.entries(state.war.warUpgradeLevels)) {
     const upgrade = WAR_UPGRADE_BY_ID[id];
-    if (!upgrade) {
+    if (!upgrade || level <= 0) {
       continue;
     }
-    const effect = upgrade.effect;
+    const effect = upgrade.effectPerLevel;
     if (effect.offenseBonus) {
-      offenseBonus += effect.offenseBonus;
+      offenseBonus += effect.offenseBonus * level;
     }
     if (effect.defenseBonus) {
-      defenseBonus += effect.defenseBonus;
+      defenseBonus += effect.defenseBonus * level;
     }
     if (effect.vaultProtectPct) {
-      vaultProtectPct += effect.vaultProtectPct;
+      vaultProtectPct += effect.vaultProtectPct * level;
     }
     if (effect.lossMult) {
-      lossMult *= effect.lossMult;
+      lossMult *= Math.pow(effect.lossMult, level);
     }
     if (effect.lootMult) {
-      lootMult *= effect.lootMult;
+      lootMult *= Math.pow(effect.lootMult, level);
     }
     if (effect.attackCooldownMult) {
-      attackCooldownMult *= effect.attackCooldownMult;
+      attackCooldownMult *= Math.pow(effect.attackCooldownMult, level);
+    }
+    if (effect.shieldDurationBonusSec) {
+      shieldDurationBonusSec += effect.shieldDurationBonusSec * level;
     }
   }
 
@@ -1090,6 +1204,7 @@ const getWarUpgradeBonuses = (state: GameState) => {
     lossMult,
     lootMult,
     attackCooldownMult,
+    shieldDurationBonusSec,
   };
 };
 
@@ -1127,6 +1242,24 @@ const getWarLootMultForState = (state: GameState) => getWarUpgradeBonuses(state)
 
 const getWarLossMultForState = (state: GameState) => getWarUpgradeBonuses(state).lossMult;
 
+const getWarShieldDurationMsForState = (state: GameState) => {
+  const bonuses = getWarUpgradeBonuses(state);
+  return WAR_SHIELD_MS + bonuses.shieldDurationBonusSec * 1000;
+};
+
+const getPlayerWarStateForEngine = (state: GameState): PlayerWarState => ({
+  trophies: state.war.trophies,
+  league: state.war.league,
+  offense: getWarOffensePowerForState(state),
+  defense: getWarDefensePowerForState(state),
+  vaultProtectionPct: getWarVaultProtectPctForState(state),
+  shieldUntil: state.war.shieldUntil,
+  lastTargetRefreshAt: state.war.lastTargetsAt,
+  lastRaidAt: state.war.attackCooldownUntil ?? 0,
+  incomePerSec: getIncomePerSecTotalForState(state),
+  heatUntil: state.war.heatUntil ?? undefined,
+});
+
 const scheduleNextRaidAt = (seed: number, leagueConfig: ReturnType<typeof getLeagueConfig>) => {
   const { value, next } = randomFloat(seed);
   const minutes =
@@ -1136,47 +1269,19 @@ const scheduleNextRaidAt = (seed: number, leagueConfig: ReturnType<typeof getLea
 };
 
 const generateWarTargets = (state: GameState, seed: number, now: number) => {
-  const defensePower = getWarDefensePowerForState(state);
-  const incomePerSec = getIncomePerSecTotalForState(state);
-  const difficulties: Array<{
-    difficulty: WarTarget["difficulty"];
-    defenseMult: number;
-    lootSeconds: number;
-    trophyWin: number;
-    trophyLoss: number;
-    lootVaultFactor: number;
-  }> = [
-    { difficulty: "easy", defenseMult: 0.8, lootSeconds: 60, trophyWin: 8, trophyLoss: 4, lootVaultFactor: 0.95 },
-    { difficulty: "medium", defenseMult: 1.0, lootSeconds: 180, trophyWin: 15, trophyLoss: 8, lootVaultFactor: 0.9 },
-    { difficulty: "hard", defenseMult: 1.2, lootSeconds: 480, trophyWin: 25, trophyLoss: 12, lootVaultFactor: 0.85 },
-  ];
-
-  let nextSeedValue = seed;
-  const availableNames = [...WAR_TARGET_NAMES];
-  const targets: WarTarget[] = difficulties.map((entry, index) => {
-    let name = "Rival Firm";
-    if (availableNames.length > 0) {
-      const nameRoll = randomFloat(nextSeedValue);
-      nextSeedValue = nameRoll.next;
-      const pickIndex = Math.floor(nameRoll.value * availableNames.length);
-      name = availableNames.splice(pickIndex, 1)[0] ?? name;
-    }
-    const { value: noise, next } = randomFloat(nextSeedValue);
-    nextSeedValue = next;
-    const defense = defensePower * entry.defenseMult + noise * 6;
-    const loot = incomePerSec * entry.lootSeconds * entry.lootVaultFactor;
-    return {
-      id: `target-${now}-${index}`,
-      name,
-      defense,
-      loot,
-      trophyWin: entry.trophyWin,
-      trophyLoss: entry.trophyLoss,
-      difficulty: entry.difficulty,
-    };
-  });
-
-  return { targets, seed: nextSeedValue };
+  const player = getPlayerWarStateForEngine(state);
+  const generated = generateTargets(player, seed, now, defaultCooldowns, WAR_TARGET_NAMES);
+  const targets: WarTarget[] = generated.value.map((target, index) => ({
+    id: target.id,
+    name: target.name,
+    defense: target.defense,
+    lootCap: target.lootCap,
+    trophyWin: target.trophyDeltaWin,
+    trophyLoss: Math.abs(target.trophyDeltaLose),
+    difficulty: index === 0 ? "easy" : index === 1 ? "medium" : "hard",
+    refreshAt: target.refreshAt,
+  }));
+  return { targets, seed: generated.seed };
 };
 
 const sampleUpgradeOffers = (available: UpgradeDef[], count: number) => {
@@ -1929,11 +2034,12 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   buyWarUpgrade: (id) => {
     const state = get();
     const upgrade = WAR_UPGRADE_BY_ID[id];
-    if (!upgrade || state.war.warUpgrades.includes(id)) {
+    if (!upgrade) {
       return;
     }
     const incomePerSec = getIncomePerSecTotalForState(state);
-    const cost = getWarUpgradeCost(incomePerSec, upgrade);
+    const currentLevel = state.war.warUpgradeLevels[id] ?? 0;
+    const cost = getWarUpgradeCost(incomePerSec, upgrade, currentLevel);
     if (cost <= 0 || state.cash < cost) {
       return;
     }
@@ -1941,7 +2047,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       cash: state.cash - cost,
       war: {
         ...state.war,
-        warUpgrades: [...state.war.warUpgrades, id],
+        warUpgradeLevels: {
+          ...state.war.warUpgradeLevels,
+          [id]: currentLevel + 1,
+        },
       },
     });
   },
@@ -1975,47 +2084,50 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     if (!target) {
       return;
     }
-    const offense = getWarOffensePowerForState(state);
-    const defense = target.defense;
     const leagueConfig = getLeagueConfig(state.war.league);
     const incomePerSec = getIncomePerSecTotalForState(state);
     let seed = state.war.rngSeed;
-    const roll = randomFloat(seed);
-    seed = roll.next;
-    const pWin = sigmoid((offense - defense) / WAR_PWIN_SCALE);
-    const win = roll.value < pWin;
+    const player = getPlayerWarStateForEngine(state);
+    const targetCard: WarTargetCard = {
+      id: target.id,
+      name: target.name,
+      defense: target.defense,
+      lootCap: target.lootCap,
+      trophyDeltaWin: target.trophyWin,
+      trophyDeltaLose: -target.trophyLoss,
+      refreshAt: target.refreshAt,
+    };
+    const resolved = resolveRaid(player, targetCard, seed, now, WAR_PWIN_SCALE);
+    seed = resolved.seed;
+    const win = resolved.value.log.result === "win";
     let cash = state.cash;
     let totalEarned = state.totalEarned;
-    let loot = 0;
-    let trophiesDelta = 0;
     const lootMult = getWarLootMultForState(state);
     const lootCap =
       incomePerSec *
       Math.min(WAR_MAX_LOOT_MINUTES, leagueConfig.attackLootCapMinutes) *
       60;
-
+    let loot = resolved.value.log.loot * lootMult;
+    loot = Math.min(loot, lootCap);
     if (win) {
-      loot = Math.min(target.loot * lootMult, lootCap);
       cash += loot;
       totalEarned += loot;
-      trophiesDelta = target.trophyWin;
-    } else {
-      trophiesDelta = -target.trophyLoss;
     }
+    const trophiesDelta = win ? target.trophyWin : -target.trophyLoss;
 
     const nextTrophies = Math.max(0, state.war.trophies + trophiesDelta);
     const nextLeague = getLeagueForTrophies(nextTrophies);
     const cooldownMs = getWarAttackCooldownMsForState(state);
     const report: BattleReport = {
       kind: "attack",
-      offense,
-      defense,
-      pWin,
-      roll: roll.value,
+      offense: player.offense,
+      defense: target.defense,
+      pWin: resolved.value.log.chance,
+      roll: resolved.value.log.roll,
       incomePerSec,
       loot,
       lootCap,
-      targetLoot: target.loot,
+      targetLoot: target.lootCap,
       lootMult,
     };
     const raidLog: RaidEvent = {
@@ -2036,7 +2148,25 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       now
     );
 
-    const generated = generateWarTargets(state, seed, now);
+    let heatUntil = state.war.heatUntil;
+    let nextRaidAt = state.war.nextRaidAt;
+    if (!win) {
+      const heatRoll = randomFloat(seed);
+      seed = heatRoll.next;
+      heatUntil = now + (120_000 + heatRoll.value * 180_000);
+      nextRaidAt = Math.min(nextRaidAt, now + 120_000);
+    }
+
+    const updatedTargets = state.war.targets.map((entry) =>
+      entry.id === target.id
+        ? {
+            ...entry,
+            lootCap: win
+              ? Math.max(entry.lootCap - loot, entry.lootCap * 0.45)
+              : entry.lootCap,
+          }
+        : entry
+    );
     set({
       cash,
       totalEarned,
@@ -2046,9 +2176,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         league: nextLeague,
         attackCooldownUntil: now + cooldownMs,
         raidLog: [raidLog, ...state.war.raidLog].slice(0, 10),
-        rngSeed: generated.seed,
-        targets: generated.targets,
-        lastTargetsAt: now,
+        rngSeed: seed,
+        targets: updatedTargets,
+        heatUntil,
+        nextRaidAt,
       },
       ...appendUiEvent(state, event),
     });
@@ -2062,7 +2193,9 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     let pendingEvent: UiEvent | null = null;
 
     const shouldRefreshTargets =
-      war.targets.length === 0 || now - war.lastTargetsAt >= WAR_TARGET_REFRESH_MS;
+      war.targets.length === 0 ||
+      war.targets.some((target) => target.refreshAt <= now) ||
+      now - war.lastTargetsAt >= WAR_TARGET_REFRESH_MS;
     if (shouldRefreshTargets) {
       const generated = generateWarTargets(state, seed, now);
       seed = generated.seed;
@@ -2079,107 +2212,150 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       changed = true;
     }
 
-    if (war.shieldUntil && war.nextRaidAt <= war.shieldUntil) {
-      const config = getLeagueConfig(war.league);
-      const schedule = scheduleNextRaidAt(seed, config);
-      seed = schedule.seed;
-      war = {
-        ...war,
-        nextRaidAt: war.shieldUntil + schedule.nextAtMs,
-      };
-      changed = true;
-    }
+    const leagueConfig = getLeagueConfig(war.league);
+    const defensePower = getWarDefensePowerForState(state);
+    const incomePerSec = getIncomePerSecTotalForState(state);
+    const vaultProtectPct = getWarVaultProtectPctForState(state);
+    const lossMult = getWarLossMultForState(state);
+    const raidEligible = war.trophies >= WAR_RAID_TROPHY_THRESHOLD;
 
-    if (now >= war.nextRaidAt && war.trophies >= WAR_RAID_TROPHY_THRESHOLD && !war.shieldUntil) {
-      const leagueConfig = getLeagueConfig(war.league);
-      const offenseBase = getWarOffensePowerForState(state);
-      const defensePower = getWarDefensePowerForState(state);
-      const rollOffense = randomFloat(seed);
-      seed = rollOffense.next;
-      const attackerOffense = offenseBase * (0.8 + rollOffense.value * 0.5);
-      const pDefend = sigmoid((defensePower - attackerOffense) / WAR_PWIN_SCALE);
-      const rollResult = randomFloat(seed);
-      seed = rollResult.next;
-      const defended = rollResult.value < pDefend;
-      let loss = 0;
-      let trophiesDelta = defended ? 2 : -4;
-      const incomePerSec = getIncomePerSecTotalForState(state);
-      const vaultProtectPct = getWarVaultProtectPctForState(state);
-      const lossMult = getWarLossMultForState(state);
-      const capMinutes = Math.min(
-        WAR_MAX_LOSS_MINUTES,
-        leagueConfig.defenseLossCapMinutes
-      );
-      const lootCap = incomePerSec * capMinutes * 60;
-      let stealPct = 0;
-      let lootableCash = 0;
+    if (war.incomingRaid) {
+      if (now >= war.incomingRaid.endsAt) {
+        const attackerWins = war.incomingRaid.roll < war.incomingRaid.chance;
+        let loss = 0;
+        let protectedAmount = 0;
+        if (attackerWins) {
+          const stealBase = cash * war.incomingRaid.stealPct;
+          protectedAmount = stealBase * war.incomingRaid.vaultProtectPct;
+          loss = Math.min(
+            Math.max(0, stealBase - protectedAmount),
+            war.incomingRaid.lootCap * lossMult
+          );
+          cash = Math.max(0, cash - loss);
+        }
 
-      if (!defended) {
-        lootableCash = Math.max(0, cash * (1 - vaultProtectPct));
-        const rollLoss = randomFloat(seed);
-        seed = rollLoss.next;
-        stealPct = 0.06 + rollLoss.value * 0.06;
-        loss = Math.min(lootableCash * stealPct * lossMult, lootCap);
-        cash = Math.max(0, cash - loss);
+        const trophiesDelta = attackerWins ? -4 : 1;
+        const nextTrophies = Math.max(0, war.trophies + trophiesDelta);
+        const nextLeague = getLeagueForTrophies(nextTrophies);
+        const shieldDuration = getWarShieldDurationMsForState(state);
+        const schedule = scheduleNextRaidAt(seed, leagueConfig);
+        seed = schedule.seed;
+
+        const report: RaidReport = {
+          result: attackerWins ? "loss" : "win",
+          lootLost: loss,
+          protectedAmount,
+          trophiesDelta,
+          at: now,
+        };
+
+        const reportDetail: BattleReport = {
+          kind: "defense",
+          offense: war.incomingRaid.attackerOffense,
+          defense: defensePower,
+          pWin: 1 - war.incomingRaid.chance,
+          roll: war.incomingRaid.roll,
+          incomePerSec,
+          loot: loss,
+          lootCap: war.incomingRaid.lootCap,
+          vaultProtectPct,
+          lootableCash: cash,
+          stealPct: war.incomingRaid.stealPct,
+          lossMult,
+        };
+
+        const raidLog: RaidEvent = {
+          id: `defense-${now}`,
+          kind: "defense",
+          result: attackerWins ? "loss" : "win",
+          loot: loss,
+          trophiesDelta,
+          at: now,
+          report: reportDetail,
+        };
+
+        const event = createUiEvent(
+          "defense",
+          attackerWins ? "Hostile action succeeded" : "Countermeasures triggered",
+          attackerWins ? "Asset extraction complete" : "No losses recorded",
+          attackerWins ? -loss : undefined,
+          now
+        );
+
+        war = {
+          ...war,
+          trophies: nextTrophies,
+          league: nextLeague,
+          incomingRaid: null,
+          raidReport: report,
+          unreadRaidReport: true,
+          shieldUntil: now + shieldDuration,
+          nextRaidAt: now + shieldDuration + schedule.nextAtMs,
+          raidLog: [raidLog, ...war.raidLog].slice(0, 10),
+        };
+        changed = true;
+
+        if (now - state.lastUiEventAt > UI_EVENT_MIN_GAP_MS) {
+          pendingEvent = event;
+        }
       }
+    } else {
+      const cashThreshold = 50;
+      const heatActive = war.heatUntil && war.heatUntil > now;
+      const triggerAt = heatActive ? war.nextRaidAt - 120_000 : war.nextRaidAt;
+      if (raidEligible && now >= triggerAt && !war.shieldUntil && cash > cashThreshold) {
+        const rollWindow = randomFloat(seed);
+        seed = rollWindow.next;
+        const durationMs = (60 + rollWindow.value * 60) * 1000;
 
-      const schedule = scheduleNextRaidAt(seed, leagueConfig);
-      seed = schedule.seed;
-      const nextTrophies = Math.max(0, war.trophies + trophiesDelta);
-      const nextLeague = getLeagueForTrophies(nextTrophies);
-      const report: BattleReport = {
-        kind: "defense",
-        offense: attackerOffense,
-        defense: defensePower,
-        pWin: pDefend,
-        roll: rollResult.value,
-        incomePerSec,
-        loot: loss,
-        lootCap,
-        vaultProtectPct,
-        lootableCash,
-        stealPct,
-        lossMult,
-      };
-      const raidLog: RaidEvent = {
-        id: `defense-${now}`,
-        kind: "defense",
-        result: defended ? "win" : "loss",
-        loot: loss,
-        trophiesDelta,
-        at: now,
-        report,
-      };
-      const event = createUiEvent(
-        "defense",
-        defended ? "Countermeasures triggered" : "Hostile action succeeded",
-        defended ? "No losses recorded" : "Asset extraction complete",
-        defended ? undefined : -loss,
-        now
-      );
+        const rollOffense = randomFloat(seed);
+        seed = rollOffense.next;
+        const leagueBonus = war.league === "silver" ? 5 : war.league === "gold" ? 10 : war.league === "diamond" ? 15 : 0;
+        const attackerOffense = defensePower + (-15 + rollOffense.value * 50) + leagueBonus;
+        const chance = clampNumber(sigmoid((attackerOffense - defensePower) / WAR_PWIN_SCALE), 0.05, 0.95);
 
-      war = {
-        ...war,
-        trophies: nextTrophies,
-        league: nextLeague,
-        shieldUntil: now + WAR_SHIELD_MS,
-        nextRaidAt: now + WAR_SHIELD_MS + schedule.nextAtMs,
-        raidLog: [raidLog, ...war.raidLog].slice(0, 10),
-      };
-      changed = true;
+        const rollOutcome = randomFloat(seed);
+        seed = rollOutcome.next;
 
-      if (now - state.lastUiEventAt > UI_EVENT_MIN_GAP_MS) {
-        pendingEvent = event;
+        const rollSteal = randomFloat(seed);
+        seed = rollSteal.next;
+        const stealPct = 0.06 + rollSteal.value * 0.12;
+
+        const capMinutes = Math.min(
+          WAR_MAX_LOSS_MINUTES,
+          leagueConfig.defenseLossCapMinutes
+        );
+        const lootCap = incomePerSec * capMinutes * 60;
+
+        const schedule = scheduleNextRaidAt(seed, leagueConfig);
+        seed = schedule.seed;
+
+        war = {
+          ...war,
+          incomingRaid: {
+            endsAt: now + durationMs,
+            attackerOffense,
+            chance,
+            roll: rollOutcome.value,
+            vaultProtectPct,
+            lootCap,
+            stealPct,
+          },
+          nextRaidAt: now + schedule.nextAtMs,
+        };
+        changed = true;
+      } else if (
+        now >= war.nextRaidAt &&
+        (!raidEligible || cash <= cashThreshold)
+      ) {
+        const schedule = scheduleNextRaidAt(seed, leagueConfig);
+        seed = schedule.seed;
+        war = {
+          ...war,
+          nextRaidAt: now + schedule.nextAtMs,
+        };
+        changed = true;
       }
-    } else if (now >= war.nextRaidAt && war.trophies < WAR_RAID_TROPHY_THRESHOLD) {
-      const config = getLeagueConfig(war.league);
-      const schedule = scheduleNextRaidAt(seed, config);
-      seed = schedule.seed;
-      war = {
-        ...war,
-        nextRaidAt: now + schedule.nextAtMs,
-      };
-      changed = true;
     }
 
     if (seed !== war.rngSeed) {

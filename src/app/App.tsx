@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { BUSINESS_DEFS } from "../game/economy";
 import type { BusinessId } from "../game/economy";
@@ -8,6 +8,7 @@ import {
   getHqConfig,
   getQueueSlotsForHq,
   getUnlockedBuildingIdsForHq,
+  getUnlockedBuyModesForHq,
 } from "../game/base";
 import { formatDuration, formatMoney, formatMultiplier } from "../game/format";
 import {
@@ -52,7 +53,6 @@ const App = () => {
   const getBusinessBuyInfo = useGameStore((state) => state.getBusinessBuyInfo);
   const getManagerCost = useGameStore((state) => state.getManagerCost);
   const getNextMilestone = useGameStore((state) => state.getNextMilestone);
-  const unlockedBuyModes = useGameStore((state) => state.getUnlockedBuyModes());
   const businesses = useGameStore((state) => state.businesses);
   const buildings = useGameStore((state) => state.buildings);
   const buildQueue = useGameStore((state) => state.buildQueue);
@@ -63,6 +63,7 @@ const App = () => {
   const getBuildingUpgradeCost = useGameStore((state) => state.getBuildingUpgradeCost);
   const getBuildingUpgradeTimeSec = useGameStore((state) => state.getBuildingUpgradeTimeSec);
   const hqLevel = useGameStore((state) => state.getHqLevel());
+  const unlockedBuyModes = useMemo(() => getUnlockedBuyModesForHq(hqLevel), [hqLevel]);
   const totalEarned = useGameStore((state) => state.totalEarned);
   const safeCash = useGameStore((state) => state.safeCash);
   const upgradeOffers = useGameStore((state) => state.upgradeOffers);
@@ -337,7 +338,7 @@ const App = () => {
       }
       return {
         title: `${cash >= cost ? "Upgrade" : "Save for"} Head Office to L${hqLevel + 1}`,
-        detail: `${formatMoney(cost)} · ${formatDuration(duration)} → ${
+        detail: `${formatMoney(cost)} � ${formatDuration(duration)} ? ${
           unlockParts.length > 0 ? unlockParts.join(" + ") : "new unlocks"
         }`,
       };
@@ -351,7 +352,7 @@ const App = () => {
       const cost = getManagerCost(managerTarget.id);
       return {
         title: `${cash >= cost ? "Hire" : "Save for"} ${managerTarget.name} handler`,
-        detail: `${formatMoney(cost)} · auto-runs cycles`,
+        detail: `${formatMoney(cost)} � auto-runs cycles`,
       };
     }
 
@@ -379,7 +380,7 @@ const App = () => {
       const target = milestoneTargets[0];
       return {
         title: `Buy ${target.missing} ${target.def.name} to reach ${target.nextMilestone.count} owned`,
-        detail: `→ ${formatMultiplier(target.nextMilestone.mult)} profit`,
+        detail: `? ${formatMultiplier(target.nextMilestone.mult)} profit`,
       };
     }
 
@@ -721,3 +722,9 @@ const App = () => {
 };
 
 export default App;
+
+
+
+
+
+

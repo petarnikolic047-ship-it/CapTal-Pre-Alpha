@@ -162,7 +162,7 @@ const WarRoom = ({ now, cash, incomePerSec }: WarRoomProps) => {
               <div className="war-target-info">
                 <div className="war-target-name">{target.name}</div>
                 <div className="war-target-meta">
-                  Loot {formatMoney(target.loot * 0.8)} - {formatMoney(target.loot * 1.2)}
+                  Loot {formatMoney(target.lootCap * 0.8)} - {formatMoney(target.lootCap * 1.2)}
                 </div>
                 <div className="war-target-meta">
                   Risk {target.difficulty === "easy"
@@ -209,7 +209,7 @@ const WarRoom = ({ now, cash, incomePerSec }: WarRoomProps) => {
               upgrade={upgrade}
               cash={cash}
               incomePerSec={incomePerSec}
-              owned={war.warUpgrades.includes(upgrade.id)}
+              level={war.warUpgradeLevels[upgrade.id] ?? 0}
               onBuy={buyWarUpgrade}
             />
           ))}
@@ -227,7 +227,7 @@ const WarRoom = ({ now, cash, incomePerSec }: WarRoomProps) => {
               upgrade={upgrade}
               cash={cash}
               incomePerSec={incomePerSec}
-              owned={war.warUpgrades.includes(upgrade.id)}
+              level={war.warUpgradeLevels[upgrade.id] ?? 0}
               onBuy={buyWarUpgrade}
             />
           ))}
@@ -286,27 +286,28 @@ type WarUpgradeCardProps = {
   upgrade: WarUpgradeDef;
   cash: number;
   incomePerSec: number;
-  owned: boolean;
+  level: number;
   onBuy: (id: string) => void;
 };
 
-const WarUpgradeCard = ({ upgrade, cash, incomePerSec, owned, onBuy }: WarUpgradeCardProps) => {
-  const cost = getWarUpgradeCost(incomePerSec, upgrade);
+const WarUpgradeCard = ({ upgrade, cash, incomePerSec, level, onBuy }: WarUpgradeCardProps) => {
+  const cost = getWarUpgradeCost(incomePerSec, upgrade, level);
   const canAfford = cash >= cost && cost > 0;
   return (
     <div className="war-upgrade-card">
       <div>
         <div className="war-upgrade-name">{upgrade.name}</div>
         <div className="war-upgrade-desc">{upgrade.description}</div>
+        <div className="war-upgrade-meta">Level {level}</div>
         <div className="war-upgrade-meta">Cost: {formatMoney(cost)}</div>
       </div>
       <button
         className="war-action-button"
         type="button"
-        disabled={owned || !canAfford}
+        disabled={!canAfford}
         onClick={() => onBuy(upgrade.id)}
       >
-        {owned ? "Owned" : "Buy"}
+        Upgrade
       </button>
     </div>
   );
