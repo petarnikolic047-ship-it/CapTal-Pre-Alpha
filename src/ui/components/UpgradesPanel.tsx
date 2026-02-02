@@ -1,13 +1,15 @@
-﻿import type { UpgradeDef } from "../../game/upgrades";
+import type { UpgradeDef } from "../../game/upgrades";
 import { getUpgradeCost } from "../../game/upgrades";
-import { BUSINESS_BY_ID } from "../../game/economy";
 import { formatDuration, formatMoney, formatMultiplier } from "../../game/format";
 
 type UpgradesPanelProps = {
-  upgrades: UpgradeDef[];
+  offers: UpgradeDef[];
   cash: number;
   incomePerSec: number;
+  refreshInMs: number;
+  isOpen: boolean;
   onBuy: (id: string) => void;
+  onClose: () => void;
 };
 
 const formatEffect = (upgrade: UpgradeDef) => {
@@ -21,59 +23,70 @@ const formatEffect = (upgrade: UpgradeDef) => {
   return parts.join(" · ");
 };
 
-const formatUnlock = (upgrade: UpgradeDef) => {
-  const parts: string[] = [];
-  if (upgrade.unlock.businessId && upgrade.unlock.countAtLeast) {
-    const name = BUSINESS_BY_ID[upgrade.unlock.businessId]?.name ?? "Business";
-    parts.push(`Own ${upgrade.unlock.countAtLeast} ${name}`);
+const UpgradesPanel = ({
+  offers,
+  cash,
+  incomePerSec,
+  refreshInMs,
+  isOpen,
+  onBuy,
+  onClose,
+}: UpgradesPanelProps) => {
+  if (!isOpen) {
+    return null;
   }
-  if (upgrade.unlock.totalCashEarnedAtLeast) {
-    parts.push(`Earn ${formatMoney(upgrade.unlock.totalCashEarnedAtLeast)} total`);
-  }
-  if (parts.length === 0) {
-    return "Unlocked by: Starter";
-  }
-  return `Unlocked by: ${parts.join(" + ")}`;
-};
 
-const UpgradesPanel = ({ upgrades, cash, incomePerSec, onBuy }: UpgradesPanelProps) => {
   return (
-    <section className="upgrades-panel">
-      <div className="upgrades-header">
-        <h2>Upgrades</h2>
-        {upgrades.length > 0 && <span className="upgrade-dot" />}
-      </div>
-      {upgrades.length === 0 ? (
-        <div className="upgrades-empty">No upgrades available yet.</div>
-      ) : (
-        <div className="upgrades-list">
-          {upgrades.map((upgrade) => {
-            const cost = getUpgradeCost(incomePerSec, upgrade);
-            const canAfford = cash >= cost && cost > 0;
-            return (
-              <div className="upgrade-card" key={upgrade.id}>
-                <div>
-                  <div className="upgrade-name">{upgrade.name}</div>
-                  <div className="upgrade-effect">{formatEffect(upgrade)}</div>
-                  <div className="upgrade-unlock">{formatUnlock(upgrade)}</div>
-                  <div className="upgrade-meta">
-                    Target {formatDuration(upgrade.targetSeconds * 1000)} of income
-                  </div>
-                </div>
-                <button
-                  className="upgrade-buy"
-                  type="button"
-                  disabled={!canAfford}
-                  onClick={() => onBuy(upgrade.id)}
-                >
-                  Buy {formatMoney(cost)}
-                </button>
-              </div>
-            );
-          })}
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div>
+            <h2>Upgrades</h2>
+            <div className="modal-subtitle">
+              Offers refresh in {formatDuration(refreshInMs)}
+            </div>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose}>
+            Close
+          </button>
         </div>
-      )}
-    </section>
+
+        {offers.length === 0 ? (
+          <div className="upgrades-empty">No upgrade offers yet.</div>
+        ) : (
+          <div className="upgrade-offers">
+            {offers.map((upgrade) => {
+              const cost = getUpgradeCost(incomePerSec, upgrade);
+              const canAfford = cash >= cost && cost > 0;
+              return (
+                <div className="upgrade-card" key={upgrade.id}>
+                  <div>
+                    <div className="upgrade-name">{upgrade.name}</div>
+                    <div className="upgrade-effect">{formatEffect(upgrade)}</div>
+                    <div className="upgrade-meta">
+                      Target {formatDuration(upgrade.targetSeconds * 1000)} of income
+                    </div>
+                  </div>
+                  <button
+                    className="upgrade-buy"
+                    type="button"
+                    disabled={!canAfford}
+                    onClick={() => onBuy(upgrade.id)}
+                  >
+                    Buy {formatMoney(cost)}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 

@@ -4,16 +4,16 @@ import { BUSINESS_DEFS } from "../game/economy";
 import type { BusinessId } from "../game/economy";
 import { formatMoney } from "../game/format";
 import { getAvailableProjects, getProjectSlots } from "../game/projects";
-import { getAvailableUpgradesForCounts } from "../game/upgrades";
+import { UPGRADE_BY_ID } from "../game/upgrades";
 import { useGameStore } from "../game/store";
 import BusinessCard from "../ui/components/BusinessCard";
 import BuyModeToggle from "../ui/components/BuyModeToggle";
+import GoalsBar from "../ui/components/GoalsBar";
 import ProjectsPanel from "../ui/components/ProjectsPanel";
+import SafePanel from "../ui/components/SafePanel";
 import StatBar from "../ui/components/StatBar";
 import UpgradesPanel from "../ui/components/UpgradesPanel";
 import WorkButton from "../ui/components/WorkButton";
-
-const UPGRADES_UNLOCK_TOTAL = 200;
 
 type BuyFeedback = Partial<Record<BusinessId, { qty: number; at: number }>>;
 
@@ -39,11 +39,20 @@ const App = () => {
   const businesses = useGameStore((state) => state.businesses);
   const purchasedUpgrades = useGameStore((state) => state.purchasedUpgrades);
   const totalEarned = useGameStore((state) => state.totalEarned);
+  const safeCash = useGameStore((state) => state.safeCash);
+  const upgradeOffers = useGameStore((state) => state.upgradeOffers);
+  const lastOfferRefreshAt = useGameStore((state) => state.lastOfferRefreshAt);
+  const activeGoals = useGameStore((state) => state.activeGoals);
+  const projectsStarted = useGameStore((state) => state.projectsStarted);
+  const depositSafe = useGameStore((state) => state.depositSafe);
+  const withdrawSafe = useGameStore((state) => state.withdrawSafe);
+  const theftThreshold = useGameStore((state) => state.getTheftThreshold());
   const runningProjects = useGameStore((state) => state.runningProjects);
   const completedProjects = useGameStore((state) => state.completedProjects);
 
   const [now, setNow] = useState(() => Date.now());
   const [buyFeedback, setBuyFeedback] = useState<BuyFeedback>(() => ({}));
+  const [showUpgrades, setShowUpgrades] = useState(false);
 
   useEffect(() => {
     let frameId = 0;
@@ -51,8 +60,12 @@ const App = () => {
 
     const tick = () => {
       const current = Date.now();
-      useGameStore.getState().processBusinessCycles(current);
-      useGameStore.getState().processProjectCompletions(current);
+      const store = useGameStore.getState();
+      store.processBusinessCycles(current);
+      store.processProjectCompletions(current);
+      store.processGoals(current);
+      store.processUpgradeOffers(current);
+      store.processRiskEvents(current);
       if (current - lastUiUpdate > 120) {
         lastUiUpdate = current;
         setNow(current);
@@ -113,16 +126,13 @@ const App = () => {
     }, {} as Record<BusinessId, number>);
   }, [businesses]);
 
-  const upgradesUnlocked = totalEarned >= UPGRADES_UNLOCK_TOTAL;
-  const availableUpgrades = useMemo(
-    () =>
-      upgradesUnlocked
-        ? getAvailableUpgradesForCounts(businessCounts, totalEarned, purchasedUpgrades)
-        : [],
-    [businessCounts, totalEarned, purchasedUpgrades, upgradesUnlocked]
+  const upgradeOfferDefs = useMemo(
+    () => upgradeOffers.flatMap((id) => (UPGRADE_BY_ID[id] ? [UPGRADE_BY_ID[id]] : [])),
+    [upgradeOffers]
   );
-
-  const projectSlots = useMemo(() => getProjectSlots(completedProjects), [completedProjects]);
+  const offerRefreshIn = Math.max(0, 90_000 - (now - lastOfferRefreshAt));
+  const theftRisk = cash > theftThreshold;
+  const projectSlots = useMemo(() => getProjectSlots(), []);
   const availableProjects = useMemo(
     () => getAvailableProjects(completedProjects, runningProjects, totalEarned),
     [completedProjects, runningProjects, totalEarned]
@@ -137,20 +147,44 @@ const App = () => {
         </div>
       </header>
 
+      <GoalsBar
+        goals={activeGoals}
+        counts={businessCounts}
+        purchasedUpgradesCount={purchasedUpgrades.length}
+        projectsStarted={projectsStarted}
+      />
       <StatBar cash={cash} incomePerSec={incomePerSec} />
+      <SafePanel
+        cash={cash}
+        safeCash={safeCash}
+        theftThreshold={theftThreshold}
+        theftRisk={theftRisk}
+        onDeposit={depositSafe}
+        onWithdraw={withdrawSafe}
+      />
       <WorkButton onWork={tapWork} />
 
       <section className="business-panel">
         <div className="business-controls">
           <BuyModeToggle value={buyMode} onChange={setBuyMode} />
-          <button
-            className="run-all-button"
-            type="button"
-            onClick={runAllBusinesses}
-            disabled={!canRunAll}
-          >
-            Run All
-          </button>
+          <div className="business-controls-actions">
+            <button
+              className="upgrades-button"
+              type="button"
+              onClick={() => setShowUpgrades(true)}
+            >
+              Upgrades
+              {upgradeOfferDefs.length > 0 && <span className="upgrade-dot" />}
+            </button>
+            <button
+              className="run-all-button"
+              type="button"
+              onClick={runAllBusinesses}
+              disabled={!canRunAll}
+            >
+              Run All
+            </button>
+          </div>
         </div>
 
         <div className="business-list">
@@ -238,24 +272,15 @@ const App = () => {
         now={now}
         onStart={startProject}
       />
-
-      {upgradesUnlocked ? (
-        <UpgradesPanel
-          upgrades={availableUpgrades}
-          cash={cash}
-          incomePerSec={incomePerSec}
-          onBuy={buyUpgrade}
-        />
-      ) : (
-        <section className="upgrades-panel upgrades-locked">
-          <div className="upgrades-header">
-            <h2>Upgrades</h2>
-          </div>
-          <div className="upgrades-empty">
-            Unlocks at {UPGRADES_UNLOCK_TOTAL} total earned.
-          </div>
-        </section>
-      )}
+      <UpgradesPanel
+        isOpen={showUpgrades}
+        offers={upgradeOfferDefs}
+        cash={cash}
+        incomePerSec={incomePerSec}
+        refreshInMs={offerRefreshIn}
+        onBuy={buyUpgrade}
+        onClose={() => setShowUpgrades(false)}
+      />
     </div>
   );
 };

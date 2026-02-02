@@ -1,7 +1,8 @@
-﻿export type ProjectEffect = {
-  projectSlotsAdd?: number;
+export type ProjectEffect = {
   offlineCapSecondsAdd?: number;
   globalProfitMult?: number;
+  globalTimeMult?: number;
+  autoRunAll?: boolean;
 };
 
 export type ProjectUnlock = {
@@ -25,43 +26,95 @@ export type ProjectRun = {
   cost: number;
 };
 
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
 export const PROJECT_DEFS: ProjectDef[] = [
-  {
-    id: "slot-2",
-    name: "Second Project Slot",
-    description: "Add a second concurrent project slot.",
-    durationMs: 10 * 60 * 1000,
-    targetSeconds: 15 * 60,
-    effect: { projectSlotsAdd: 1 },
-    unlock: { totalEarnedAtLeast: 500 },
-  },
   {
     id: "offline-cap-2h",
     name: "Offline Battery",
     description: "Increase offline cap by +2 hours.",
-    durationMs: 5 * 60 * 1000,
-    targetSeconds: 7 * 60,
+    durationMs: 10 * 60 * 1000,
+    targetSeconds: 10 * 60,
     effect: { offlineCapSecondsAdd: 2 * 60 * 60 },
     unlock: { totalEarnedAtLeast: 200 },
   },
   {
+    id: "profit-boost-25",
+    name: "Profit Protocol",
+    description: "Increase all profits by +25%.",
+    durationMs: 15 * 60 * 1000,
+    targetSeconds: 15 * 60,
+    effect: { globalProfitMult: 1.25 },
+    unlock: { totalEarnedAtLeast: 1000 },
+  },
+  {
+    id: "cycle-optimization",
+    name: "Cycle Optimization",
+    description: "Speed up all cycles by 10%.",
+    durationMs: 20 * 60 * 1000,
+    targetSeconds: 20 * 60,
+    effect: { globalTimeMult: 0.9 },
+    unlock: { totalEarnedAtLeast: 5000 },
+  },
+  {
+    id: "auto-dispatch",
+    name: "Auto Dispatch",
+    description: "Auto-run all idle businesses.",
+    durationMs: 25 * 60 * 1000,
+    targetSeconds: 25 * 60,
+    effect: { autoRunAll: true },
+    unlock: { totalEarnedAtLeast: 15000 },
+  },
+  {
     id: "profit-boost-50",
-    name: "Global Profit Protocol",
+    name: "Marketing Blitz",
     description: "Increase all profits by +50%.",
     durationMs: 30 * 60 * 1000,
     targetSeconds: 30 * 60,
     effect: { globalProfitMult: 1.5 },
-    unlock: { totalEarnedAtLeast: 2000 },
+    unlock: { totalEarnedAtLeast: 10000 },
   },
   {
-    id: "slot-3",
-    name: "Third Project Slot",
-    description: "Add a third concurrent project slot.",
-    durationMs: 20 * 60 * 1000,
+    id: "offline-cap-4h",
+    name: "Night Shift",
+    description: "Increase offline cap by +4 hours.",
+    durationMs: 35 * 60 * 1000,
+    targetSeconds: 40 * 60,
+    effect: { offlineCapSecondsAdd: 4 * 60 * 60 },
+    unlock: { totalEarnedAtLeast: 20000 },
+  },
+  {
+    id: "cycle-overclock",
+    name: "Overclocked Lines",
+    description: "Speed up all cycles by 15%.",
+    durationMs: 45 * 60 * 1000,
+    targetSeconds: 45 * 60,
+    effect: { globalTimeMult: 0.85 },
+    unlock: { totalEarnedAtLeast: 50000 },
+  },
+  {
+    id: "offline-cap-8h",
+    name: "Deep Storage",
+    description: "Increase offline cap by +8 hours.",
+    durationMs: 60 * 60 * 1000,
     targetSeconds: 60 * 60,
-    effect: { projectSlotsAdd: 1 },
+    effect: { offlineCapSecondsAdd: 8 * 60 * 60 },
+    unlock: { totalEarnedAtLeast: 250000 },
+  },
+  {
+    id: "profit-boost-100",
+    name: "Executive Efficiency",
+    description: "Increase all profits by +100%.",
+    durationMs: 90 * 60 * 1000,
+    targetSeconds: 90 * 60,
+    effect: { globalProfitMult: 2.0 },
+    unlock: { totalEarnedAtLeast: 1000000 },
+  },
+  {
+    id: "cycle-mastery",
+    name: "Cycle Mastery",
+    description: "Speed up all cycles by 25%.",
+    durationMs: 120 * 60 * 1000,
+    targetSeconds: 120 * 60,
+    effect: { globalTimeMult: 0.75 },
     unlock: { totalEarnedAtLeast: 5000000 },
   },
 ];
@@ -73,18 +126,7 @@ export const PROJECT_BY_ID: Record<string, ProjectDef> = Object.fromEntries(
 export const getProjectCost = (incomePerSec: number, project: ProjectDef) =>
   Math.max(0, incomePerSec * project.targetSeconds);
 
-export const getProjectSlots = (completedProjects: string[]) => {
-  const base = 1;
-  const bonus = completedProjects.reduce((sum, id) => {
-    const def = PROJECT_BY_ID[id];
-    if (!def) {
-      return sum;
-    }
-    return sum + (def.effect.projectSlotsAdd ?? 0);
-  }, 0);
-
-  return clamp(base + bonus, 1, 3);
-};
+export const getProjectSlots = () => 1;
 
 export const getProjectOfflineCapBonusSeconds = (completedProjects: string[]) =>
   completedProjects.reduce((sum, id) => {
@@ -103,6 +145,18 @@ export const getProjectGlobalProfitMult = (completedProjects: string[]) =>
     }
     return mult * def.effect.globalProfitMult;
   }, 1);
+
+export const getProjectGlobalTimeMult = (completedProjects: string[]) =>
+  completedProjects.reduce((mult, id) => {
+    const def = PROJECT_BY_ID[id];
+    if (!def || !def.effect.globalTimeMult) {
+      return mult;
+    }
+    return mult * def.effect.globalTimeMult;
+  }, 1);
+
+export const getProjectAutoRunAll = (completedProjects: string[]) =>
+  completedProjects.some((id) => PROJECT_BY_ID[id]?.effect.autoRunAll);
 
 export const isProjectUnlocked = (project: ProjectDef, totalEarned: number) => {
   const required = project.unlock?.totalEarnedAtLeast ?? 0;

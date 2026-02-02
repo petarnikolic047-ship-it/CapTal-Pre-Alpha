@@ -14,9 +14,6 @@ type ProjectsPanelProps = {
 
 const formatEffect = (project: ProjectDef) => {
   const parts: string[] = [];
-  if (project.effect.projectSlotsAdd) {
-    parts.push(`+${project.effect.projectSlotsAdd} project slot`);
-  }
   if (project.effect.offlineCapSecondsAdd) {
     const hours = project.effect.offlineCapSecondsAdd / 3600;
     parts.push(`+${hours}h offline cap`);
@@ -24,6 +21,13 @@ const formatEffect = (project: ProjectDef) => {
   if (project.effect.globalProfitMult) {
     const bonus = project.effect.globalProfitMult - 1;
     parts.push(`+${Math.round(bonus * 100)}% profit`);
+  }
+  if (project.effect.globalTimeMult) {
+    const speed = Math.round((1 - project.effect.globalTimeMult) * 100);
+    parts.push(`-${speed}% cycle time`);
+  }
+  if (project.effect.autoRunAll) {
+    parts.push("Auto-run all businesses");
   }
   return parts.join(" · ");
 };
