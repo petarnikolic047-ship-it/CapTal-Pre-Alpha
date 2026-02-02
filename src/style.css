@@ -2078,3 +2078,174 @@ body {
     box-shadow: 0 5px 0 var(--hud-edge), 0 12px 22px rgba(0, 0, 0, 0.4);
   }
 }
+
+/* --- Raid overlay animation --- */
+.raid-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 8, 12, 0.72);
+  z-index: 80;
+  animation: raid-fade-in 200ms ease-out;
+}
+
+.raid-overlay-card {
+  width: min(520px, 92vw);
+  background: #1f242c;
+  border: 3px solid #0b0d12;
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+  box-shadow: 0 6px 0 #0b0d12, 0 18px 30px rgba(0, 0, 0, 0.45);
+  display: grid;
+  gap: 14px;
+  text-align: center;
+}
+
+.raid-overlay-header {
+  display: grid;
+  gap: 4px;
+}
+
+.raid-overlay-title {
+  font-family: var(--font-display);
+  letter-spacing: 2px;
+  font-size: 20px;
+  color: var(--accent-gold);
+}
+
+.raid-overlay-target {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #e8d8bf;
+}
+
+.raid-panels {
+  display: grid;
+  gap: 8px;
+}
+
+.raid-panel {
+  background: #2f3540;
+  border: 2px solid #0b0d12;
+  box-shadow: 0 4px 0 #0b0d12;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-family: var(--font-display);
+  letter-spacing: 1px;
+  font-size: 18px;
+  text-transform: uppercase;
+  opacity: 0;
+  transform: translateY(18px) scale(0.98);
+  animation: raid-panel-in 400ms ease-out forwards;
+}
+
+.raid-panel.panel-1 {
+  animation-delay: 0.2s;
+}
+
+.raid-panel.panel-2 {
+  animation-delay: 0.9s;
+}
+
+.raid-panel.panel-3 {
+  animation-delay: 1.6s;
+}
+
+.raid-stamp {
+  font-family: var(--font-display);
+  font-size: 42px;
+  letter-spacing: 4px;
+  padding: 6px 16px;
+  border: 3px solid;
+  border-radius: 12px;
+  text-transform: uppercase;
+  transform: scale(0.7) rotate(-6deg);
+  opacity: 0;
+  animation: raid-stamp-in 300ms ease-out forwards;
+  animation-delay: 2.3s;
+}
+
+.raid-stamp.win {
+  color: #0f3a1d;
+  background: #37e68f;
+  border-color: #0b0d12;
+}
+
+.raid-stamp.loss {
+  color: #4c0a0a;
+  background: #ff6b6b;
+  border-color: #0b0d12;
+}
+
+.raid-reward {
+  display: grid;
+  gap: 6px;
+  opacity: 0;
+  animation: raid-reward-in 200ms ease-out forwards;
+  animation-delay: 2.8s;
+}
+
+.raid-loot {
+  font-family: var(--font-display);
+  font-size: 26px;
+  letter-spacing: 1px;
+}
+
+.raid-loot.gain {
+  color: var(--accent-gain);
+}
+
+.raid-loot.loss {
+  color: var(--accent-danger);
+}
+
+.raid-meta {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #e8d8bf;
+}
+
+.raid-skip {
+  margin: 0 auto;
+  border: 2px solid #0b0d12;
+  background: #2a3039;
+  color: #fdf6e8;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+@keyframes raid-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes raid-panel-in {
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes raid-stamp-in {
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(-6deg);
+  }
+}
+
+@keyframes raid-reward-in {
+  to {
+    opacity: 1;
+  }
+}

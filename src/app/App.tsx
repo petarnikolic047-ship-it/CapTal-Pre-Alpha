@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { BUSINESS_DEFS } from "../game/economy";
 import type { BusinessId } from "../game/economy";
@@ -27,9 +27,11 @@ import ProjectsPanel from "../ui/components/ProjectsPanel";
 import SafePanel from "../ui/components/SafePanel";
 import UpgradesPanel from "../ui/components/UpgradesPanel";
 import WarRoom from "../ui/components/WarRoom";
+import RaidOverlay from "../ui/components/RaidOverlay";
 import WorkButton from "../ui/components/WorkButton";
 import ToastStack from "../ui/components/ToastStack";
 import type { GoalContext } from "../game/goals";
+import type { RaidEvent } from "../game/war";
 import { getGoalProgress } from "../game/goals";
 
 type BuyFeedback = Partial<Record<BusinessId, { qty: number; at: number }>>;
@@ -75,6 +77,7 @@ const App = () => {
   const runningProjects = useGameStore((state) => state.runningProjects);
   const completedProjects = useGameStore((state) => state.completedProjects);
   const trophies = useGameStore((state) => state.war.trophies);
+  const war = useGameStore((state) => state.war);
   const uiEvents = useGameStore((state) => state.uiEvents);
   const dismissUiEvent = useGameStore((state) => state.dismissUiEvent);
   const queueSlots = useGameStore((state) => state.getBuildQueueSlots());
@@ -87,6 +90,20 @@ const App = () => {
   const [showMarket, setShowMarket] = useState(false);
   const [showWar, setShowWar] = useState(false);
   const [showOperations, setShowOperations] = useState(false);
+  const [raidAnimation, setRaidAnimation] = useState<RaidEvent | null>(null);
+  const lastRaidId = useRef<string | null>(null);
+
+  useEffect(() => {
+    const latestRaid = war.raidLog[0];
+    if (!latestRaid || latestRaid.kind !== "attack") {
+      return;
+    }
+    if (latestRaid.id === lastRaidId.current) {
+      return;
+    }
+    lastRaidId.current = latestRaid.id;
+    setRaidAnimation(latestRaid);
+  }, [war.raidLog]);
 
   useEffect(() => {
     let frameId = 0;
@@ -505,6 +522,8 @@ const App = () => {
         <WorkButton onWork={tapWork} />
       </div>
 
+      <RaidOverlay raid={raidAnimation} onClose={() => setRaidAnimation(null)} />
+
       <ToastStack events={uiEvents} onDismiss={dismissUiEvent} />
 
       {showGoals && (
@@ -722,6 +741,7 @@ const App = () => {
 };
 
 export default App;
+
 
 
 
