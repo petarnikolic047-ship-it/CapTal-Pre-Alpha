@@ -1,10 +1,12 @@
 ﻿import type { UpgradeDef } from "../../game/upgrades";
+import { getUpgradeCost } from "../../game/upgrades";
 import { BUSINESS_BY_ID } from "../../game/economy";
-import { formatMoney, formatMultiplier } from "../../game/format";
+import { formatDuration, formatMoney, formatMultiplier } from "../../game/format";
 
 type UpgradesPanelProps = {
   upgrades: UpgradeDef[];
   cash: number;
+  incomePerSec: number;
   onBuy: (id: string) => void;
 };
 
@@ -34,7 +36,7 @@ const formatUnlock = (upgrade: UpgradeDef) => {
   return `Unlocked by: ${parts.join(" + ")}`;
 };
 
-const UpgradesPanel = ({ upgrades, cash, onBuy }: UpgradesPanelProps) => {
+const UpgradesPanel = ({ upgrades, cash, incomePerSec, onBuy }: UpgradesPanelProps) => {
   return (
     <section className="upgrades-panel">
       <div className="upgrades-header">
@@ -46,13 +48,17 @@ const UpgradesPanel = ({ upgrades, cash, onBuy }: UpgradesPanelProps) => {
       ) : (
         <div className="upgrades-list">
           {upgrades.map((upgrade) => {
-            const canAfford = cash >= upgrade.cost;
+            const cost = getUpgradeCost(incomePerSec, upgrade);
+            const canAfford = cash >= cost && cost > 0;
             return (
               <div className="upgrade-card" key={upgrade.id}>
                 <div>
                   <div className="upgrade-name">{upgrade.name}</div>
                   <div className="upgrade-effect">{formatEffect(upgrade)}</div>
                   <div className="upgrade-unlock">{formatUnlock(upgrade)}</div>
+                  <div className="upgrade-meta">
+                    Target {formatDuration(upgrade.targetSeconds * 1000)} of income
+                  </div>
                 </div>
                 <button
                   className="upgrade-buy"
@@ -60,7 +66,7 @@ const UpgradesPanel = ({ upgrades, cash, onBuy }: UpgradesPanelProps) => {
                   disabled={!canAfford}
                   onClick={() => onBuy(upgrade.id)}
                 >
-                  Buy {formatMoney(upgrade.cost)}
+                  Buy {formatMoney(cost)}
                 </button>
               </div>
             );

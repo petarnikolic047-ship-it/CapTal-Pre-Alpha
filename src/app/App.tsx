@@ -2,13 +2,20 @@
 
 import { BUSINESS_DEFS } from "../game/economy";
 import type { BusinessId } from "../game/economy";
+import { formatMoney } from "../game/format";
+import { getAvailableProjects, getProjectSlots } from "../game/projects";
 import { getAvailableUpgradesForCounts } from "../game/upgrades";
 import { useGameStore } from "../game/store";
 import BusinessCard from "../ui/components/BusinessCard";
 import BuyModeToggle from "../ui/components/BuyModeToggle";
+import ProjectsPanel from "../ui/components/ProjectsPanel";
 import StatBar from "../ui/components/StatBar";
 import UpgradesPanel from "../ui/components/UpgradesPanel";
 import WorkButton from "../ui/components/WorkButton";
+
+const UPGRADES_UNLOCK_TOTAL = 200;
+
+type BuyFeedback = Partial<Record<BusinessId, { qty: number; at: number }>>;
 
 const App = () => {
   const cash = useGameStore((state) => state.cash);
@@ -21,6 +28,7 @@ const App = () => {
   const runAllBusinesses = useGameStore((state) => state.runAllBusinesses);
   const hireManager = useGameStore((state) => state.hireManager);
   const buyUpgrade = useGameStore((state) => state.buyUpgrade);
+  const startProject = useGameStore((state) => state.startProject);
   const getBusinessState = useGameStore((state) => state.getBusinessState);
   const getBusinessNextCost = useGameStore((state) => state.getBusinessNextCost);
   const getBusinessProfitPerCycle = useGameStore((state) => state.getBusinessProfitPerCycle);
@@ -31,8 +39,11 @@ const App = () => {
   const businesses = useGameStore((state) => state.businesses);
   const purchasedUpgrades = useGameStore((state) => state.purchasedUpgrades);
   const totalEarned = useGameStore((state) => state.totalEarned);
+  const runningProjects = useGameStore((state) => state.runningProjects);
+  const completedProjects = useGameStore((state) => state.completedProjects);
 
   const [now, setNow] = useState(() => Date.now());
+  const [buyFeedback, setBuyFeedback] = useState<BuyFeedback>(() => ({}));
 
   useEffect(() => {
     let frameId = 0;
@@ -41,6 +52,7 @@ const App = () => {
     const tick = () => {
       const current = Date.now();
       useGameStore.getState().processBusinessCycles(current);
+      useGameStore.getState().processProjectCompletions(current);
       if (current - lastUiUpdate > 120) {
         lastUiUpdate = current;
         setNow(current);
@@ -79,9 +91,19 @@ const App = () => {
     };
   }, []);
 
-  const canRunAll = BUSINESS_DEFS.some((def) => {
+  const unlockedBusinessDefs = useMemo(
+    () => BUSINESS_DEFS.filter((def) => (def.unlockAtTotalEarned ?? 0) <= totalEarned),
+    [totalEarned]
+  );
+
+  const lockedBusinessDefs = useMemo(
+    () => BUSINESS_DEFS.filter((def) => (def.unlockAtTotalEarned ?? 0) > totalEarned),
+    [totalEarned]
+  );
+
+  const canRunAll = unlockedBusinessDefs.some((def) => {
     const business = getBusinessState(def.id);
-    return business.count > 0 && !business.managerOwned && !business.running;
+    return business.count > 0 && !business.running;
   });
 
   const businessCounts = useMemo(() => {
@@ -91,9 +113,19 @@ const App = () => {
     }, {} as Record<BusinessId, number>);
   }, [businesses]);
 
+  const upgradesUnlocked = totalEarned >= UPGRADES_UNLOCK_TOTAL;
   const availableUpgrades = useMemo(
-    () => getAvailableUpgradesForCounts(businessCounts, totalEarned, purchasedUpgrades),
-    [businessCounts, totalEarned, purchasedUpgrades]
+    () =>
+      upgradesUnlocked
+        ? getAvailableUpgradesForCounts(businessCounts, totalEarned, purchasedUpgrades)
+        : [],
+    [businessCounts, totalEarned, purchasedUpgrades, upgradesUnlocked]
+  );
+
+  const projectSlots = useMemo(() => getProjectSlots(completedProjects), [completedProjects]);
+  const availableProjects = useMemo(
+    () => getAvailableProjects(completedProjects, runningProjects, totalEarned),
+    [completedProjects, runningProjects, totalEarned]
   );
 
   return (
@@ -122,7 +154,7 @@ const App = () => {
         </div>
 
         <div className="business-list">
-          {BUSINESS_DEFS.map((def) => {
+          {unlockedBusinessDefs.map((def) => {
             const business = getBusinessState(def.id);
             const profitPerCycle = getBusinessProfitPerCycle(def.id);
             const cycleTimeMs = getBusinessCycleTimeMs(def.id);
@@ -130,11 +162,29 @@ const App = () => {
             const buyInfo = getBusinessBuyInfo(def.id);
             const managerCost = getManagerCost(def.id);
             const nextMilestone = getNextMilestone(def.id);
+            const feedback = buyFeedback[def.id];
+            const lastBoughtQty =
+              feedback && now - feedback.at < 1500 ? feedback.qty : undefined;
 
-            const progress =
-              business.running && business.endsAt
-                ? 1 - Math.max(0, Math.min(1, (business.endsAt - now) / cycleTimeMs))
-                : 0;
+            const progress = (() => {
+              if (!business.running || !business.endsAt || cycleTimeMs <= 0) {
+                return 0;
+              }
+              const remaining = business.endsAt - now;
+              const clampedRemaining = Math.min(Math.max(remaining, 0), cycleTimeMs);
+              return 1 - clampedRemaining / cycleTimeMs;
+            })();
+
+            const handleBuy = () => {
+              if (buyInfo.quantity <= 0 || cash < buyInfo.cost) {
+                return;
+              }
+              buyBusiness(def.id);
+              setBuyFeedback((prev) => ({
+                ...prev,
+                [def.id]: { qty: buyInfo.quantity, at: Date.now() },
+              }));
+            };
 
             return (
               <BusinessCard
@@ -151,16 +201,61 @@ const App = () => {
                 canAffordManager={cash >= managerCost}
                 nextMilestone={nextMilestone}
                 progress={progress}
+                lastBoughtQty={lastBoughtQty}
                 onRun={() => runBusiness(def.id)}
-                onBuy={() => buyBusiness(def.id)}
+                onBuy={handleBuy}
                 onHireManager={() => hireManager(def.id)}
               />
             );
           })}
         </div>
+
+        {lockedBusinessDefs.length > 0 && (
+          <details className="locked-section">
+            <summary>Locked Businesses ({lockedBusinessDefs.length})</summary>
+            <div className="locked-list">
+              {lockedBusinessDefs.map((def) => (
+                <div className="business-card locked" key={def.id}>
+                  <div className="business-header">
+                    <h3>{def.name}</h3>
+                  </div>
+                  <div className="business-meta">
+                    Unlocks at {formatMoney(def.unlockAtTotalEarned ?? 0)} total earned
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
       </section>
 
-      <UpgradesPanel upgrades={availableUpgrades} cash={cash} onBuy={buyUpgrade} />
+      <ProjectsPanel
+        projects={availableProjects}
+        runningProjects={runningProjects}
+        projectSlots={projectSlots}
+        cash={cash}
+        incomePerSec={incomePerSec}
+        now={now}
+        onStart={startProject}
+      />
+
+      {upgradesUnlocked ? (
+        <UpgradesPanel
+          upgrades={availableUpgrades}
+          cash={cash}
+          incomePerSec={incomePerSec}
+          onBuy={buyUpgrade}
+        />
+      ) : (
+        <section className="upgrades-panel upgrades-locked">
+          <div className="upgrades-header">
+            <h2>Upgrades</h2>
+          </div>
+          <div className="upgrades-empty">
+            Unlocks at {UPGRADES_UNLOCK_TOTAL} total earned.
+          </div>
+        </section>
+      )}
     </div>
   );
 };

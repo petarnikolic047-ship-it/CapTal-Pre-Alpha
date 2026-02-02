@@ -15,6 +15,7 @@ type BusinessCardProps = {
   canAffordManager: boolean;
   nextMilestone: MilestoneInfo | null;
   progress: number;
+  lastBoughtQty?: number;
   onRun: () => void;
   onBuy: () => void;
   onHireManager: () => void;
@@ -41,6 +42,7 @@ const BusinessCard = ({
   canAffordManager,
   nextMilestone,
   progress,
+  lastBoughtQty,
   onRun,
   onBuy,
   onHireManager,
@@ -95,6 +97,7 @@ const BusinessCard = ({
         >
           {business.managerOwned ? "Manager Hired" : `Hire Manager (${formatMoney(managerCost)})`}
         </button>
+        {lastBoughtQty ? <div className="buy-feedback">Bought {lastBoughtQty}</div> : null}
       </div>
     </div>
   );
