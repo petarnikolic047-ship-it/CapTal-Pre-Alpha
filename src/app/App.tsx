@@ -2,10 +2,10 @@
 
 import { BUSINESS_DEFS } from "../game/economy";
 import type { BusinessId } from "../game/economy";
-import { formatMoney } from "../game/format";
 import { getAvailableProjects, getProjectSlots } from "../game/projects";
 import { UPGRADE_BY_ID } from "../game/upgrades";
 import { useGameStore } from "../game/store";
+import BaseScreen from "../ui/components/BaseScreen";
 import BusinessCard from "../ui/components/BusinessCard";
 import BuyModeToggle from "../ui/components/BuyModeToggle";
 import GoalsBar from "../ui/components/GoalsBar";
@@ -36,6 +36,7 @@ const App = () => {
   const getBusinessBuyInfo = useGameStore((state) => state.getBusinessBuyInfo);
   const getManagerCost = useGameStore((state) => state.getManagerCost);
   const getNextMilestone = useGameStore((state) => state.getNextMilestone);
+  const unlockedBuyModes = useGameStore((state) => state.getUnlockedBuyModes());
   const businesses = useGameStore((state) => state.businesses);
   const purchasedUpgrades = useGameStore((state) => state.purchasedUpgrades);
   const totalEarned = useGameStore((state) => state.totalEarned);
@@ -53,6 +54,7 @@ const App = () => {
   const [now, setNow] = useState(() => Date.now());
   const [buyFeedback, setBuyFeedback] = useState<BuyFeedback>(() => ({}));
   const [showUpgrades, setShowUpgrades] = useState(false);
+  const [activeScreen, setActiveScreen] = useState<"base" | "market">("base");
 
   useEffect(() => {
     let frameId = 0;
@@ -62,6 +64,7 @@ const App = () => {
       const current = Date.now();
       const store = useGameStore.getState();
       store.processBusinessCycles(current);
+      store.processBuildQueue(current);
       store.processProjectCompletions(current);
       store.processGoals(current);
       store.processUpgradeOffers(current);
@@ -104,17 +107,9 @@ const App = () => {
     };
   }, []);
 
-  const unlockedBusinessDefs = useMemo(
-    () => BUSINESS_DEFS.filter((def) => (def.unlockAtTotalEarned ?? 0) <= totalEarned),
-    [totalEarned]
-  );
+  const marketBusinessDefs = useMemo(() => BUSINESS_DEFS, []);
 
-  const lockedBusinessDefs = useMemo(
-    () => BUSINESS_DEFS.filter((def) => (def.unlockAtTotalEarned ?? 0) > totalEarned),
-    [totalEarned]
-  );
-
-  const canRunAll = unlockedBusinessDefs.some((def) => {
+  const canRunAll = marketBusinessDefs.some((def) => {
     const business = getBusinessState(def.id);
     return business.count > 0 && !business.running;
   });
@@ -164,18 +159,39 @@ const App = () => {
       />
       <WorkButton onWork={tapWork} />
 
-      <section className="business-panel">
-        <div className="business-controls">
-          <BuyModeToggle value={buyMode} onChange={setBuyMode} />
-          <div className="business-controls-actions">
-            <button
-              className="upgrades-button"
-              type="button"
-              onClick={() => setShowUpgrades(true)}
-            >
-              Upgrades
-              {upgradeOfferDefs.length > 0 && <span className="upgrade-dot" />}
-            </button>
+      <div className="screen-tabs">
+        <div className="tab-group">
+          <button
+            className={`tab-button ${activeScreen === "base" ? "active" : ""}`}
+            type="button"
+            onClick={() => setActiveScreen("base")}
+          >
+            Base
+          </button>
+          <button
+            className={`tab-button ${activeScreen === "market" ? "active" : ""}`}
+            type="button"
+            onClick={() => setActiveScreen("market")}
+          >
+            Market
+          </button>
+        </div>
+        <button
+          className="upgrades-button"
+          type="button"
+          onClick={() => setShowUpgrades(true)}
+        >
+          Upgrades
+          {upgradeOfferDefs.length > 0 && <span className="upgrade-dot" />}
+        </button>
+      </div>
+
+      {activeScreen === "base" ? (
+        <BaseScreen now={now} buyMode={buyMode} cash={cash} />
+      ) : (
+        <section className="business-panel">
+          <div className="business-controls">
+            <BuyModeToggle value={buyMode} onChange={setBuyMode} allowedModes={unlockedBuyModes} />
             <button
               className="run-all-button"
               type="button"
@@ -185,83 +201,74 @@ const App = () => {
               Run All
             </button>
           </div>
-        </div>
 
-        <div className="business-list">
-          {unlockedBusinessDefs.map((def) => {
-            const business = getBusinessState(def.id);
-            const profitPerCycle = getBusinessProfitPerCycle(def.id);
-            const cycleTimeMs = getBusinessCycleTimeMs(def.id);
-            const nextCost = getBusinessNextCost(def.id);
-            const buyInfo = getBusinessBuyInfo(def.id);
-            const managerCost = getManagerCost(def.id);
-            const nextMilestone = getNextMilestone(def.id);
-            const feedback = buyFeedback[def.id];
-            const lastBoughtQty =
-              feedback && now - feedback.at < 1500 ? feedback.qty : undefined;
+          <div className="business-list">
+            {marketBusinessDefs.map((def) => {
+              const business = getBusinessState(def.id);
+              const profitPerCycle = getBusinessProfitPerCycle(def.id);
+              const cycleTimeMs = getBusinessCycleTimeMs(def.id);
+              const nextCost = getBusinessNextCost(def.id);
+              const buyInfo = getBusinessBuyInfo(def.id);
+              const managerCost = getManagerCost(def.id);
+              const nextMilestone = getNextMilestone(def.id);
+              const feedback = buyFeedback[def.id];
+              const lastBoughtQty =
+                feedback && now - feedback.at < 1500 ? feedback.qty : undefined;
 
-            const progress = (() => {
-              if (!business.running || !business.endsAt || cycleTimeMs <= 0) {
-                return 0;
-              }
-              const remaining = business.endsAt - now;
-              const clampedRemaining = Math.min(Math.max(remaining, 0), cycleTimeMs);
-              return 1 - clampedRemaining / cycleTimeMs;
-            })();
+              const progress = (() => {
+                if (!business.running || !business.endsAt || cycleTimeMs <= 0) {
+                  return 0;
+                }
+                const remainingRaw = business.endsAt - now;
+                let remaining = remainingRaw;
+                if (remaining < 0) {
+                  const overshoot = Math.abs(remaining) % cycleTimeMs;
+                  remaining = cycleTimeMs - overshoot;
+                }
+                const clampedRemaining = Math.min(Math.max(remaining, 0), cycleTimeMs);
+                return 1 - clampedRemaining / cycleTimeMs;
+              })();
 
-            const handleBuy = () => {
-              if (buyInfo.quantity <= 0 || cash < buyInfo.cost) {
-                return;
-              }
-              buyBusiness(def.id);
-              setBuyFeedback((prev) => ({
-                ...prev,
-                [def.id]: { qty: buyInfo.quantity, at: Date.now() },
-              }));
-            };
+              const handleBuy = () => {
+                if (buyInfo.quantity <= 0 || cash < buyInfo.cost) {
+                  return;
+                }
+                buyBusiness(def.id);
+                setBuyFeedback((prev) => ({
+                  ...prev,
+                  [def.id]: { qty: buyInfo.quantity, at: Date.now() },
+                }));
+              };
 
-            return (
-              <BusinessCard
-                key={def.id}
-                def={def}
-                business={business}
-                profitPerCycle={profitPerCycle}
-                cycleTimeMs={cycleTimeMs}
-                nextCost={nextCost}
-                buyInfo={buyInfo}
-                buyMode={buyMode}
-                canAffordBuy={buyInfo.quantity > 0 && cash >= buyInfo.cost}
-                managerCost={managerCost}
-                canAffordManager={cash >= managerCost}
-                nextMilestone={nextMilestone}
-                progress={progress}
-                lastBoughtQty={lastBoughtQty}
-                onRun={() => runBusiness(def.id)}
-                onBuy={handleBuy}
-                onHireManager={() => hireManager(def.id)}
-              />
-            );
-          })}
-        </div>
+              return (
+                <BusinessCard
+                  key={def.id}
+                  def={def}
+                  business={business}
+                  profitPerCycle={profitPerCycle}
+                  cycleTimeMs={cycleTimeMs}
+                  nextCost={nextCost}
+                  buyInfo={buyInfo}
+                  buyMode={buyMode}
+                  canAffordBuy={buyInfo.quantity > 0 && cash >= buyInfo.cost}
+                  managerCost={managerCost}
+                  canAffordManager={cash >= managerCost}
+                  nextMilestone={nextMilestone}
+                  progress={progress}
+                  lastBoughtQty={lastBoughtQty}
+                  onRun={() => runBusiness(def.id)}
+                  onBuy={handleBuy}
+                  onHireManager={() => hireManager(def.id)}
+                />
+              );
+            })}
+          </div>
 
-        {lockedBusinessDefs.length > 0 && (
-          <details className="locked-section">
-            <summary>Locked Businesses ({lockedBusinessDefs.length})</summary>
-            <div className="locked-list">
-              {lockedBusinessDefs.map((def) => (
-                <div className="business-card locked" key={def.id}>
-                  <div className="business-header">
-                    <h3>{def.name}</h3>
-                  </div>
-                  <div className="business-meta">
-                    Unlocks at {formatMoney(def.unlockAtTotalEarned ?? 0)} total earned
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-      </section>
+          <div className="market-note">
+            Market is for tuning. Base is the main play screen.
+          </div>
+        </section>
+      )}
 
       <ProjectsPanel
         projects={availableProjects}

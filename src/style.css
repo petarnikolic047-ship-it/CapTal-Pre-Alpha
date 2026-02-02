@@ -54,6 +54,248 @@ body {
   color: #8d6a4a;
 }
 
+.screen-tabs {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tab-group {
+  display: flex;
+  gap: 8px;
+}
+
+.tab-button {
+  border: none;
+  padding: 8px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+  background: #eef2f7;
+  color: #3a4856;
+  cursor: pointer;
+}
+
+.tab-button.active {
+  background: #1f2b38;
+  color: #ffffff;
+}
+
+.market-note {
+  font-size: 12px;
+  color: #6b7b8a;
+  margin-top: 8px;
+}
+
+.base-screen {
+  display: grid;
+  gap: 16px;
+}
+
+.base-hud {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 14px 18px;
+  box-shadow: 0 10px 24px rgba(31, 38, 63, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.base-hud-title {
+  font-weight: 600;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.queue-badge {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.base-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.plot-tile {
+  border: none;
+  border-radius: 12px;
+  padding: 12px 10px;
+  background: #f3f4f6;
+  color: #4b5563;
+  display: grid;
+  gap: 4px;
+  align-items: center;
+  justify-items: center;
+  cursor: pointer;
+  min-height: 70px;
+}
+
+.plot-tile.occupied {
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(31, 38, 63, 0.12);
+  color: #1f2b38;
+}
+
+.plot-tile.selected {
+  outline: 2px solid #6c63ff;
+}
+
+.plot-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.plot-level {
+  font-size: 11px;
+  color: #6b7b8a;
+}
+
+.base-panel {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 18px 22px;
+  box-shadow: 0 12px 28px rgba(31, 38, 63, 0.08);
+  display: grid;
+  gap: 12px;
+}
+
+.base-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.base-panel-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.base-panel-subtitle {
+  font-size: 12px;
+  color: #7a8896;
+}
+
+.panel-close {
+  border: none;
+  background: #f3f4f6;
+  color: #1f2b38;
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.build-menu {
+  display: grid;
+  gap: 12px;
+}
+
+.build-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #f7f9fc;
+}
+
+.build-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.build-meta {
+  font-size: 12px;
+  color: #7a8896;
+}
+
+.build-button {
+  border: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  background: #1f2b38;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.build-button:disabled {
+  background: #c6ccd4;
+  color: #5c6670;
+  cursor: not-allowed;
+}
+
+.building-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.building-info {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: #4e5c6b;
+}
+
+.building-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.building-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.building-upgrade {
+  display: grid;
+  gap: 6px;
+  background: #fff7ed;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.upgrade-meta {
+  font-size: 12px;
+  color: #7a5b3b;
+}
+
+.upgrade-button {
+  border: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  background: #f97316;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.upgrade-button:disabled {
+  background: #f3d7c4;
+  color: #9a7b63;
+  cursor: not-allowed;
+}
+
+.upgrade-progress {
+  font-size: 12px;
+  color: #7a5b3b;
+}
+
 .stat-bar {
   background: #ffffff;
   border-radius: 16px;
@@ -287,6 +529,12 @@ body {
 .buy-mode-button.active {
   background: #1f2b38;
   color: #ffffff;
+}
+
+.buy-mode-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .run-all-button {
@@ -768,6 +1016,14 @@ body {
 
   .business-list {
     grid-template-columns: 1fr;
+  }
+
+  .base-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .base-panel {
+    padding: 16px;
   }
 
   .upgrade-card {

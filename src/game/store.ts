@@ -3,6 +3,17 @@
 import { BUSINESS_BY_ID, BUSINESS_DEFS } from "./economy";
 import type { BusinessDef, BusinessId } from "./economy";
 import {
+  BUILDING_BY_ID,
+  BUILDING_DEFS,
+  createPlots,
+  getBuildingProfitMult,
+  getBuildingTimeMult,
+  getPlotCountForHqLevel,
+  getQueueSlotsForHq,
+  getUnlockedBuyModesForHq,
+} from "./base";
+import type { BuildingInstance, BuildingTypeId, Plot } from "./base";
+import {
   getAvailableUpgradesForCounts,
   getUpgradeCost,
   isUpgradeUnlockedForCounts,
@@ -37,6 +48,20 @@ export type BusinessState = BusinessCoreState & {
   totalTimeMult: number;
 };
 
+type BuildQueueItem = {
+  buildingId: string;
+  finishAt: number;
+};
+
+type BuildQueueState = {
+  active: BuildQueueItem[];
+};
+
+type WorldState = {
+  plots: Plot[];
+  selectedPlotId: string | null;
+};
+
 export type TempBuff = {
   id: string;
   kind: "business-profit" | "project-time";
@@ -62,6 +87,9 @@ type GameState = {
   workTaps: number;
   buyMode: BuyMode;
   businesses: Record<BusinessId, BusinessCoreState>;
+  world: WorldState;
+  buildings: Record<string, BuildingInstance>;
+  buildQueue: BuildQueueState;
   purchasedUpgrades: string[];
   upgradeOffers: string[];
   lastOfferRefreshAt: number;
@@ -78,6 +106,9 @@ type GameState = {
 type GameActions = {
   tapWork: () => void;
   setBuyMode: (mode: BuyMode) => void;
+  selectPlot: (id: string | null) => void;
+  placeBuilding: (plotId: string, typeId: BuildingTypeId) => void;
+  startBuildingUpgrade: (buildingId: string) => void;
   buyBusiness: (id: BusinessId) => void;
   runBusiness: (id: BusinessId) => void;
   runAllBusinesses: () => void;
@@ -87,6 +118,7 @@ type GameActions = {
   buyUpgrade: (id: string) => void;
   startProject: (id: string) => void;
   processBusinessCycles: (now: number) => void;
+  processBuildQueue: (now: number) => void;
   processProjectCompletions: (now: number) => void;
   processUpgradeOffers: (now: number) => void;
   processRiskEvents: (now: number) => void;
@@ -107,6 +139,15 @@ type GameSelectors = {
   getMilestoneMult: (id: BusinessId) => number;
   getNextMilestone: (id: BusinessId) => MilestoneInfo | null;
   getIncomePerSecTotal: () => number;
+  getWorld: () => WorldState;
+  getBuildingById: (id: string) => BuildingInstance | null;
+  getBuildingForPlot: (plotId: string) => BuildingInstance | null;
+  getHqLevel: () => number;
+  getAvailableBuildingDefs: () => typeof BUILDING_DEFS;
+  getBuildingUpgradeCost: (id: string) => number;
+  getBuildingUpgradeTimeSec: (id: string) => number;
+  getBuildQueueSlots: () => number;
+  getUnlockedBuyModes: () => BuyMode[];
   getTheftThreshold: () => number;
   getTheftRisk: () => boolean;
   getAvailableUpgrades: () => UpgradeDef[];
@@ -123,6 +164,9 @@ type PersistedState = Pick<
   | "workTaps"
   | "buyMode"
   | "businesses"
+  | "world"
+  | "buildings"
+  | "buildQueue"
   | "purchasedUpgrades"
   | "projectsStarted"
   | "completedProjects"
@@ -130,7 +174,7 @@ type PersistedState = Pick<
   | "lastSeenAt"
 >;
 
-const STORAGE_KEY = "adcap-core-state-v4";
+const STORAGE_KEY = "adcap-core-state-v5";
 
 const TAP_PAY = 0.25;
 const TAP_BONUS_EVERY = 20;
@@ -183,6 +227,168 @@ const createDefaultBusinesses = (): Record<BusinessId, BusinessCoreState> =>
     return acc;
   }, {} as Record<BusinessId, BusinessCoreState>);
 
+const createDefaultWorld = (): WorldState => {
+  const plots = createPlots(getPlotCountForHqLevel(1));
+  if (plots[0]) {
+    plots[0].buildingId = "hq";
+  }
+  return {
+    plots,
+    selectedPlotId: null,
+  };
+};
+
+const createDefaultBuildings = (): Record<string, BuildingInstance> => ({
+  hq: {
+    id: "hq",
+    typeId: "hq",
+    plotId: "plot-1",
+    buildingLevel: 1,
+    upgradingUntil: null,
+  },
+});
+
+const normalizeWorld = (value: unknown): WorldState => {
+  if (!value || typeof value !== "object") {
+    return createDefaultWorld();
+  }
+  const raw = value as Record<string, unknown>;
+  const plots = Array.isArray(raw.plots)
+    ? raw.plots
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return null;
+          }
+          const plot = entry as Record<string, unknown>;
+          if (typeof plot.id !== "string") {
+            return null;
+          }
+          const x = typeof plot.x === "number" && Number.isFinite(plot.x) ? plot.x : 0;
+          const y = typeof plot.y === "number" && Number.isFinite(plot.y) ? plot.y : 0;
+          const buildingId =
+            typeof plot.buildingId === "string" ? plot.buildingId : undefined;
+          return { id: plot.id, x, y, buildingId } as Plot;
+        })
+        .filter((plot): plot is Plot => Boolean(plot))
+    : createDefaultWorld().plots;
+  return {
+    plots,
+    selectedPlotId:
+      typeof raw.selectedPlotId === "string" ? raw.selectedPlotId : null,
+  };
+};
+
+const normalizeBuildings = (value: unknown): Record<string, BuildingInstance> => {
+  if (!value || typeof value !== "object") {
+    return createDefaultBuildings();
+  }
+  const result: Record<string, BuildingInstance> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const raw = entry as Record<string, unknown>;
+    if (typeof raw.typeId !== "string" || !BUILDING_BY_ID[raw.typeId as BuildingTypeId]) {
+      continue;
+    }
+    const plotId = typeof raw.plotId === "string" ? raw.plotId : "";
+    const level =
+      typeof raw.buildingLevel === "number" && Number.isFinite(raw.buildingLevel)
+        ? Math.max(1, Math.floor(raw.buildingLevel))
+        : 1;
+    const upgradingUntil =
+      typeof raw.upgradingUntil === "number" && Number.isFinite(raw.upgradingUntil)
+        ? raw.upgradingUntil
+        : null;
+    result[key] = {
+      id: key,
+      typeId: raw.typeId as BuildingTypeId,
+      plotId,
+      buildingLevel: level,
+      upgradingUntil,
+    };
+  }
+  if (!result.hq) {
+    result.hq = {
+      id: "hq",
+      typeId: "hq",
+      plotId: "plot-1",
+      buildingLevel: 1,
+      upgradingUntil: null,
+    };
+  }
+  return result;
+};
+
+const normalizeBuildQueue = (value: unknown): BuildQueueState => {
+  if (!value || typeof value !== "object") {
+    return { active: [] };
+  }
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.active)) {
+    return { active: [] };
+  }
+  const active = raw.active
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const item = entry as Record<string, unknown>;
+      if (typeof item.buildingId !== "string") {
+        return null;
+      }
+      const finishAt =
+        typeof item.finishAt === "number" && Number.isFinite(item.finishAt)
+          ? item.finishAt
+          : 0;
+      return { buildingId: item.buildingId, finishAt } as BuildQueueItem;
+    })
+    .filter((entry): entry is BuildQueueItem => Boolean(entry));
+  return { active };
+};
+
+const ensurePlotsForHqLevel = (world: WorldState, hqLevel: number): WorldState => {
+  const required = getPlotCountForHqLevel(hqLevel);
+  if (world.plots.length >= required) {
+    return world;
+  }
+  const nextPlots = createPlots(required);
+  const existingById = new Map(world.plots.map((plot) => [plot.id, plot]));
+  for (const plot of nextPlots) {
+    const existing = existingById.get(plot.id);
+    if (existing) {
+      plot.buildingId = existing.buildingId;
+    }
+  }
+  return {
+    ...world,
+    plots: nextPlots,
+  };
+};
+
+const syncWorldBuildings = (
+  world: WorldState,
+  buildings: Record<string, BuildingInstance>
+) => {
+  const plots: Plot[] = world.plots.map((plot) => ({ ...plot, buildingId: undefined }));
+  const plotMap = new Map(plots.map((plot) => [plot.id, plot]));
+
+  for (const building of Object.values(buildings)) {
+    const plot = plotMap.get(building.plotId);
+    if (plot) {
+      plot.buildingId = building.id;
+    }
+  }
+
+  if (plots[0] && !plots[0].buildingId) {
+    plots[0].buildingId = "hq";
+  }
+
+  return {
+    ...world,
+    plots,
+  };
+};
 const normalizeBusinessState = (value: unknown): BusinessCoreState => {
   const base = createDefaultBusinessState();
 
@@ -354,13 +560,19 @@ const getBusinessDerived = (state: GameState, def: BusinessDef, countOverride?: 
   const milestoneMult = getMilestoneMult(count);
   const upgradeMults = getUpgradeMultipliers(state, def.id);
   const businessBuffMult = getBusinessBuffMult(state, def.id);
+  const buildingMults = getBuildingLevelMults(state, def.id);
   const projectProfitMult = getProjectProfitMult(state);
   const projectTimeMult = getProjectTimeMult(state);
   const profitGrowth = def.profitGrowth ?? 1;
   const profitGrowthMult = count > 0 ? Math.pow(profitGrowth, count - 1) : 1;
   const totalProfitMult =
-    milestoneMult * upgradeMults.profitMult * businessBuffMult * projectProfitMult * profitGrowthMult;
-  const totalTimeMult = upgradeMults.timeMult * projectTimeMult;
+    milestoneMult *
+    upgradeMults.profitMult *
+    businessBuffMult *
+    buildingMults.profitMult *
+    projectProfitMult *
+    profitGrowthMult;
+  const totalTimeMult = upgradeMults.timeMult * buildingMults.timeMult * projectTimeMult;
   const profitPerCycle = def.baseProfitPerCycle * count * totalProfitMult;
   const cycleTimeMs = Math.max(MIN_CYCLE_MS, def.baseCycleTimeMs * totalTimeMult);
 
@@ -415,7 +627,37 @@ const getBusinessCounts = (state: GameState): BusinessCounts =>
     return acc;
   }, {} as BusinessCounts);
 
+const getHqLevelForState = (state: GameState) =>
+  state.buildings.hq?.buildingLevel && Number.isFinite(state.buildings.hq.buildingLevel)
+    ? state.buildings.hq.buildingLevel
+    : 1;
+
+const getUnlockedBuyModesForState = (state: GameState) =>
+  getUnlockedBuyModesForHq(getHqLevelForState(state));
+
+const getBuildingForBusiness = (state: GameState, businessId: BusinessId) => {
+  const buildingDef = BUILDING_DEFS.find((def) => def.businessId === businessId);
+  if (!buildingDef) {
+    return null;
+  }
+  return (
+    Object.values(state.buildings).find((building) => building.typeId === buildingDef.id) ?? null
+  );
+};
+
+const getBuildingLevelMults = (state: GameState, businessId: BusinessId) => {
+  const building = getBuildingForBusiness(state, businessId);
+  const level = building ? building.buildingLevel : 1;
+  return {
+    profitMult: getBuildingProfitMult(level),
+    timeMult: getBuildingTimeMult(level),
+  };
+};
+
 const isBusinessUnlocked = (state: GameState, id: BusinessId) => {
+  if (getBuildingForBusiness(state, id)) {
+    return true;
+  }
   const unlockAt = BUSINESS_BY_ID[id].unlockAtTotalEarned ?? 0;
   return state.totalEarned >= unlockAt;
 };
@@ -439,6 +681,14 @@ const getIncomePerSecTotalForState = (state: GameState) =>
     const perSec = derived.cycleTimeMs > 0 ? derived.profitPerCycle / (derived.cycleTimeMs / 1000) : 0;
     return sum + perSec;
   }, 0);
+
+const getBuildingUpgradeCostForLevel = (def: (typeof BUILDING_DEFS)[number], level: number) => {
+  const base = def.upgradeBaseCost ?? def.buildCost;
+  return base * Math.pow(1.8, Math.max(0, level - 1));
+};
+
+const getBuildingUpgradeTimeSecForLevel = (level: number) =>
+  10 * Math.pow(1.6, Math.max(0, level - 1));
 
 const getTheftThresholdForState = (state: GameState) => {
   const incomePerSec = getIncomePerSecTotalForState(state);
@@ -529,9 +779,13 @@ const applyOfflineProgress = (state: GameState, now: number): GameState => {
   const stateForCalc = buffsChanged ? { ...state, activeBuffs } : state;
   const autoRunAll = hasAutoRunAll(stateForCalc);
   const dtMs = Math.min(now - lastSeenAt, getOfflineCapSeconds(state) * 1000);
+  const effectiveNow = lastSeenAt + dtMs;
   let cash = state.cash;
   let totalEarned = state.totalEarned;
   const businesses: Record<BusinessId, BusinessCoreState> = { ...state.businesses };
+  let buildings: Record<string, BuildingInstance> = { ...state.buildings };
+  let world = state.world;
+  let buyMode = state.buyMode;
 
   for (const def of BUSINESS_DEFS) {
     const current = state.businesses[def.id];
@@ -598,11 +852,65 @@ const applyOfflineProgress = (state: GameState, now: number): GameState => {
     if (!PROJECT_BY_ID[run.id] || completedProjects.has(run.id)) {
       continue;
     }
-    if (run.endsAt <= now) {
+    if (run.endsAt <= effectiveNow) {
       completedProjects.add(run.id);
       continue;
     }
-    runningProjects.push(run);
+    const remainingMs = run.endsAt - effectiveNow;
+    runningProjects.push({
+      ...run,
+      endsAt: now + remainingMs,
+    });
+  }
+
+  if (state.buildQueue.active.length > 0) {
+    const sorted = [...state.buildQueue.active].sort((a, b) => a.finishAt - b.finishAt);
+    const remaining: BuildQueueItem[] = [];
+    for (const item of sorted) {
+      if (item.finishAt <= effectiveNow) {
+        const building = buildings[item.buildingId];
+        if (!building) {
+          continue;
+        }
+        const nextLevel = building.buildingLevel + 1;
+        buildings = {
+          ...buildings,
+          [item.buildingId]: {
+            ...building,
+            buildingLevel: nextLevel,
+            upgradingUntil: null,
+          },
+        };
+        if (building.typeId === "hq") {
+          world = ensurePlotsForHqLevel(world, nextLevel);
+          world = syncWorldBuildings(world, buildings);
+          const allowed = getUnlockedBuyModesForHq(nextLevel);
+          if (!allowed.includes(buyMode)) {
+            buyMode = allowed[allowed.length - 1] ?? "x1";
+          }
+        }
+      } else {
+        const remainingMs = item.finishAt - effectiveNow;
+        remaining.push({
+          ...item,
+          finishAt: now + remainingMs,
+        });
+      }
+    }
+    return {
+      ...state,
+      cash,
+      totalEarned,
+      businesses,
+      buildings,
+      world,
+      buyMode,
+      activeBuffs: buffsChanged ? activeBuffs : state.activeBuffs,
+      completedProjects: Array.from(completedProjects),
+      runningProjects,
+      buildQueue: { active: remaining },
+      lastSeenAt: now,
+    };
   }
 
   return {
@@ -610,6 +918,9 @@ const applyOfflineProgress = (state: GameState, now: number): GameState => {
     cash,
     totalEarned,
     businesses,
+    buildings,
+    world,
+    buyMode,
     activeBuffs: buffsChanged ? activeBuffs : state.activeBuffs,
     completedProjects: Array.from(completedProjects),
     runningProjects,
@@ -626,6 +937,9 @@ const loadPersistedState = (): PersistedState => {
       workTaps: 0,
       buyMode: "x1",
       businesses: createDefaultBusinesses(),
+      world: createDefaultWorld(),
+      buildings: createDefaultBuildings(),
+      buildQueue: { active: [] },
       purchasedUpgrades: [],
       projectsStarted: 0,
       completedProjects: [],
@@ -644,6 +958,9 @@ const loadPersistedState = (): PersistedState => {
         workTaps: 0,
         buyMode: "x1",
         businesses: createDefaultBusinesses(),
+        world: createDefaultWorld(),
+        buildings: createDefaultBuildings(),
+        buildQueue: { active: [] },
         purchasedUpgrades: [],
         projectsStarted: 0,
         completedProjects: [],
@@ -661,6 +978,11 @@ const loadPersistedState = (): PersistedState => {
         : cash;
     const workTaps =
       typeof data.workTaps === "number" && Number.isFinite(data.workTaps) ? data.workTaps : 0;
+    const buildings = normalizeBuildings(data.buildings);
+    const world = syncWorldBuildings(
+      ensurePlotsForHqLevel(normalizeWorld(data.world), buildings.hq?.buildingLevel ?? 1),
+      buildings
+    );
 
     return {
       cash,
@@ -669,6 +991,9 @@ const loadPersistedState = (): PersistedState => {
       workTaps,
       buyMode: normalizeBuyMode(data.buyMode),
       businesses: normalizeBusinesses(data.businesses),
+      world,
+      buildings,
+      buildQueue: normalizeBuildQueue(data.buildQueue),
       purchasedUpgrades: normalizeUpgrades(data.purchasedUpgrades),
       projectsStarted: normalizeProjectsStarted(data.projectsStarted),
       completedProjects: normalizeCompletedProjects(data.completedProjects),
@@ -686,6 +1011,9 @@ const loadPersistedState = (): PersistedState => {
       workTaps: 0,
       buyMode: "x1",
       businesses: createDefaultBusinesses(),
+      world: createDefaultWorld(),
+      buildings: createDefaultBuildings(),
+      buildQueue: { active: [] },
       purchasedUpgrades: [],
       projectsStarted: 0,
       completedProjects: [],
@@ -698,7 +1026,7 @@ const loadPersistedState = (): PersistedState => {
 const createInitialState = () => {
   const now = Date.now();
   const persisted = loadPersistedState();
-  const baseState: GameState = {
+  let baseState: GameState = {
     ...persisted,
     safeCash: persisted.safeCash,
     upgradeOffers: [],
@@ -709,6 +1037,26 @@ const createInitialState = () => {
     activeBuffs: [],
     projectsStarted: persisted.projectsStarted,
   };
+
+  const allowedModes = getUnlockedBuyModesForState(baseState);
+  if (!allowedModes.includes(baseState.buyMode)) {
+    baseState = {
+      ...baseState,
+      buyMode: allowedModes[allowedModes.length - 1] ?? "x1",
+    };
+  }
+
+  if (baseState.buildQueue.active.length > 0) {
+    const filtered = baseState.buildQueue.active.filter(
+      (item) => Boolean(baseState.buildings[item.buildingId])
+    );
+    if (filtered.length !== baseState.buildQueue.active.length) {
+      baseState = {
+        ...baseState,
+        buildQueue: { active: filtered },
+      };
+    }
+  }
 
   const withOffline = applyOfflineProgress(baseState, now);
   const withOffers = ensureUpgradeOffers(withOffline, now);
@@ -730,7 +1078,101 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         totalEarned: state.totalEarned + earned,
       };
     }),
-  setBuyMode: (mode) => set({ buyMode: mode }),
+  setBuyMode: (mode) =>
+    set((state) => {
+      const allowed = getUnlockedBuyModesForState(state);
+      if (!allowed.includes(mode)) {
+        return state;
+      }
+      return { buyMode: mode };
+    }),
+  selectPlot: (id) =>
+    set((state) => ({
+      world: {
+        ...state.world,
+        selectedPlotId: id,
+      },
+    })),
+  placeBuilding: (plotId, typeId) => {
+    const state = get();
+    const plot = state.world.plots.find((entry) => entry.id === plotId);
+    if (!plot || plot.buildingId) {
+      return;
+    }
+    const def = BUILDING_BY_ID[typeId];
+    if (!def || typeId === "hq") {
+      return;
+    }
+    const hqLevel = getHqLevelForState(state);
+    if (def.hqLevelRequired > hqLevel) {
+      return;
+    }
+    if (Object.values(state.buildings).some((building) => building.typeId === typeId)) {
+      return;
+    }
+    if (state.cash < def.buildCost) {
+      return;
+    }
+    const buildingId = `${typeId}-${plotId}`;
+    const nextBuildings = {
+      ...state.buildings,
+      [buildingId]: {
+        id: buildingId,
+        typeId,
+        plotId,
+        buildingLevel: 1,
+        upgradingUntil: null,
+      },
+    };
+    const nextPlots = state.world.plots.map((entry) =>
+      entry.id === plotId ? { ...entry, buildingId } : entry
+    );
+    set({
+      cash: state.cash - def.buildCost,
+      buildings: nextBuildings,
+      world: {
+        ...state.world,
+        plots: nextPlots,
+        selectedPlotId: plotId,
+      },
+    });
+  },
+  startBuildingUpgrade: (buildingId) => {
+    const state = get();
+    const building = state.buildings[buildingId];
+    if (!building) {
+      return;
+    }
+    if (building.upgradingUntil) {
+      return;
+    }
+    const hqLevel = getHqLevelForState(state);
+    const queueSlots = getQueueSlotsForHq(hqLevel);
+    if (state.buildQueue.active.length >= queueSlots) {
+      return;
+    }
+    const def = BUILDING_BY_ID[building.typeId];
+    const cost = getBuildingUpgradeCostForLevel(def, building.buildingLevel);
+    if (state.cash < cost) {
+      return;
+    }
+    const durationSec = getBuildingUpgradeTimeSecForLevel(building.buildingLevel);
+    const finishAt = Date.now() + durationSec * 1000;
+    const nextBuildings = {
+      ...state.buildings,
+      [buildingId]: {
+        ...building,
+        upgradingUntil: finishAt,
+      },
+    };
+    set({
+      cash: state.cash - cost,
+      buildings: nextBuildings,
+      buildQueue: {
+        active: [...state.buildQueue.active, { buildingId, finishAt }],
+      },
+    });
+  },
   buyBusiness: (id) => {
     const state = get();
     if (!isBusinessUnlocked(state, id)) {
@@ -947,20 +1389,26 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const buffsChanged = activeBuffs.length !== state.activeBuffs.length;
     const stateForCalc = buffsChanged ? { ...state, activeBuffs } : state;
     const autoRunAll = hasAutoRunAll(stateForCalc);
-    let cash = state.cash;
-    let totalEarned = state.totalEarned;
+    let cash = Number.isFinite(state.cash) ? state.cash : 0;
+    let totalEarned = Number.isFinite(state.totalEarned) ? state.totalEarned : cash;
     let changed = buffsChanged;
     const nextBusinesses: Record<BusinessId, BusinessCoreState> = { ...state.businesses };
 
     for (const def of BUSINESS_DEFS) {
-      const business = state.businesses[def.id];
-      let running = business.running;
+      const rawBusiness = state.businesses[def.id];
+      const business = rawBusiness ?? createDefaultBusinessState();
+      const count =
+        typeof business.count === "number" && Number.isFinite(business.count)
+          ? Math.max(0, Math.floor(business.count))
+          : 0;
+      let running = Boolean(business.running);
       let endsAt = business.endsAt;
 
-      if (business.count <= 0) {
-        if (business.running || business.endsAt !== null) {
+      if (count <= 0) {
+        if (business.running || business.endsAt !== null || !rawBusiness) {
           nextBusinesses[def.id] = {
             ...business,
+            count,
             running: false,
             endsAt: null,
           };
@@ -970,13 +1418,19 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       }
 
       const derived = getBusinessDerived(stateForCalc, def);
-      const cycleTimeMs = derived.cycleTimeMs;
-      const profitPerCycle = derived.profitPerCycle;
+      const cycleTimeMs = Number.isFinite(derived.cycleTimeMs) ? derived.cycleTimeMs : MIN_CYCLE_MS;
+      const profitPerCycle = Number.isFinite(derived.profitPerCycle) ? derived.profitPerCycle : 0;
       const shouldAutoRun = business.managerOwned || autoRunAll;
 
-      if (shouldAutoRun && !running) {
+      if (!Number.isFinite(endsAt ?? NaN)) {
+        endsAt = null;
+      }
+
+      if (shouldAutoRun && (!running || endsAt === null)) {
         running = true;
         endsAt = now + cycleTimeMs;
+      } else if (!shouldAutoRun && !running) {
+        endsAt = null;
       }
 
       if (running && endsAt !== null && endsAt <= now) {
@@ -1000,9 +1454,15 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         }
       }
 
-      if (running !== business.running || endsAt !== business.endsAt) {
+      if (
+        running !== business.running ||
+        endsAt !== business.endsAt ||
+        count !== business.count ||
+        !rawBusiness
+      ) {
         nextBusinesses[def.id] = {
           ...business,
+          count,
           running,
           endsAt,
         };
@@ -1018,6 +1478,65 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         activeBuffs: buffsChanged ? activeBuffs : state.activeBuffs,
       });
     }
+  },
+  processBuildQueue: (now) => {
+    const state = get();
+    if (state.buildQueue.active.length === 0) {
+      return;
+    }
+    const sorted = [...state.buildQueue.active].sort((a, b) => a.finishAt - b.finishAt);
+    const completed: BuildQueueItem[] = [];
+    const remaining: BuildQueueItem[] = [];
+
+    for (const item of sorted) {
+      if (item.finishAt <= now) {
+        completed.push(item);
+      } else {
+        remaining.push(item);
+      }
+    }
+
+    if (completed.length === 0) {
+      return;
+    }
+
+    let buildings = { ...state.buildings };
+    let world = state.world;
+    let buyMode = state.buyMode;
+
+    for (const item of completed) {
+      const building = buildings[item.buildingId];
+      if (!building) {
+        continue;
+      }
+      const nextLevel = building.buildingLevel + 1;
+      buildings = {
+        ...buildings,
+        [item.buildingId]: {
+          ...building,
+          buildingLevel: nextLevel,
+          upgradingUntil: null,
+        },
+      };
+
+      if (building.typeId === "hq") {
+        world = ensurePlotsForHqLevel(world, nextLevel);
+        world = syncWorldBuildings(world, buildings);
+        const allowed = getUnlockedBuyModesForHq(nextLevel);
+        if (!allowed.includes(buyMode)) {
+          buyMode = allowed[allowed.length - 1] ?? "x1";
+        }
+      }
+    }
+
+    set({
+      buildings,
+      world,
+      buyMode,
+      buildQueue: {
+        active: remaining,
+      },
+    });
   },
   processProjectCompletions: (now) => {
     const state = get();
@@ -1241,6 +1760,36 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   getMilestoneMult: (id) => getMilestoneMult(get().businesses[id].count),
   getNextMilestone: (id) => getNextMilestone(get().businesses[id].count),
   getIncomePerSecTotal: () => getIncomePerSecTotalForState(get()),
+  getWorld: () => get().world,
+  getBuildingById: (id) => get().buildings[id] ?? null,
+  getBuildingForPlot: (plotId) => {
+    const plot = get().world.plots.find((entry) => entry.id === plotId);
+    if (!plot || !plot.buildingId) {
+      return null;
+    }
+    return get().buildings[plot.buildingId] ?? null;
+  },
+  getHqLevel: () => getHqLevelForState(get()),
+  getAvailableBuildingDefs: () => BUILDING_DEFS,
+  getBuildingUpgradeCost: (id) => {
+    const state = get();
+    const building = state.buildings[id];
+    if (!building) {
+      return 0;
+    }
+    const def = BUILDING_BY_ID[building.typeId];
+    return getBuildingUpgradeCostForLevel(def, building.buildingLevel);
+  },
+  getBuildingUpgradeTimeSec: (id) => {
+    const state = get();
+    const building = state.buildings[id];
+    if (!building) {
+      return 0;
+    }
+    return getBuildingUpgradeTimeSecForLevel(building.buildingLevel);
+  },
+  getBuildQueueSlots: () => getQueueSlotsForHq(getHqLevelForState(get())),
+  getUnlockedBuyModes: () => getUnlockedBuyModesForState(get()),
   getTheftThreshold: () => getTheftThresholdForState(get()),
   getTheftRisk: () => get().cash > getTheftThresholdForState(get()),
   getAvailableUpgrades: () =>
@@ -1259,6 +1808,9 @@ const selectPersistedState = (state: GameState): PersistedState => ({
   workTaps: state.workTaps,
   buyMode: state.buyMode,
   businesses: state.businesses,
+  world: state.world,
+  buildings: state.buildings,
+  buildQueue: state.buildQueue,
   purchasedUpgrades: state.purchasedUpgrades,
   projectsStarted: state.projectsStarted,
   completedProjects: state.completedProjects,
