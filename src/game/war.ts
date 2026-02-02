@@ -18,6 +18,24 @@ export type RaidEvent = {
   trophiesDelta: number;
   at: number;
   targetName?: string;
+  report: BattleReport;
+};
+
+export type BattleReport = {
+  kind: "attack" | "defense";
+  offense: number;
+  defense: number;
+  pWin: number;
+  roll: number;
+  incomePerSec: number;
+  loot: number;
+  lootCap: number;
+  targetLoot?: number;
+  lootMult?: number;
+  vaultProtectPct?: number;
+  lootableCash?: number;
+  stealPct?: number;
+  lossMult?: number;
 };
 
 export type WarState = {
@@ -116,14 +134,12 @@ export const pickFrom = <T,>(items: T[], seed: number) => {
 };
 
 export const WAR_TARGET_NAMES = [
-  "Rival Holdings",
-  "Neon Syndicate",
-  "Copper Bay Group",
-  "Skyline Partners",
   "Vertex Capital",
-  "Midnight Works",
-  "Atlas Exchange",
-  "Briarstone Inc",
-  "Northshore Labs",
-  "Driftline Co",
+  "Skyline Partners",
+  "River Dock Union",
+  "Crown & Coin Holdings",
+  "Neon Nights Group",
+  "White Glove Consulting",
+  "Ghostwire Labs",
+  "Ironheart Security",
 ];

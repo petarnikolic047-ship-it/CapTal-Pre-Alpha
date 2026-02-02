@@ -15,6 +15,7 @@
 export type BusinessDef = {
   id: BusinessId;
   name: string;
+  description: string;
   baseCost: number;
   costGrowth: number;
   baseProfitPerCycle: number;
@@ -27,7 +28,8 @@ export type BusinessDef = {
 export const BUSINESS_DEFS: BusinessDef[] = [
   {
     id: "lemonade",
-    name: "Lemonade Stand",
+    name: "Backroom Card Table",
+    description: "Quiet stakes. Loud obligations.",
     baseCost: 10,
     costGrowth: 1.15,
     baseProfitPerCycle: 0.4,
@@ -38,7 +40,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "newspaper",
-    name: "Newspaper Rack",
+    name: "Clickfarm Studio",
+    description: "Engagement on demand. Truth optional.",
     baseCost: 50,
     costGrowth: 1.16,
     baseProfitPerCycle: 4.8,
@@ -49,7 +52,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "carwash",
-    name: "Car Wash",
+    name: "Course Academy Lite",
+    description: "Sell the dream, keep the refunds moving.",
     baseCost: 200,
     costGrowth: 1.17,
     baseProfitPerCycle: 36.0,
@@ -60,7 +64,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "pizza",
-    name: "Pizza Shop",
+    name: "Refund Desk",
+    description: "Customer success, just inverted.",
     baseCost: 1000,
     costGrowth: 1.18,
     baseProfitPerCycle: 240.0,
@@ -71,7 +76,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "coffee",
-    name: "Coffee Cart",
+    name: "Cafe Front",
+    description: "A clean story with a back door.",
     baseCost: 5000,
     costGrowth: 1.19,
     baseProfitPerCycle: 900,
@@ -82,7 +88,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "foodtruck",
-    name: "Food Truck",
+    name: "Delivery Kiosk",
+    description: "Convenience with a paper trail.",
     baseCost: 25000,
     costGrowth: 1.2,
     baseProfitPerCycle: 4800,
@@ -93,7 +100,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "gym",
-    name: "Fitness Gym",
+    name: "Influencer Agency",
+    description: "Market trust, bulk rates.",
     baseCost: 120000,
     costGrowth: 1.205,
     baseProfitPerCycle: 27000,
@@ -104,7 +112,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "laundromat",
-    name: "Laundromat",
+    name: "Local News Desk",
+    description: "Own the narrative, write the receipts.",
     baseCost: 600000,
     costGrowth: 1.21,
     baseProfitPerCycle: 144000,
@@ -115,7 +124,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "arcade",
-    name: "Retro Arcade",
+    name: "Media Channel",
+    description: "Volume beats accuracy.",
     baseCost: 3000000,
     costGrowth: 1.215,
     baseProfitPerCycle: 700000,
@@ -126,7 +136,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "hotel",
-    name: "Boutique Hotel",
+    name: "Logistics Yard",
+    description: "Inventory moves. So do favors.",
     baseCost: 15000000,
     costGrowth: 1.22,
     baseProfitPerCycle: 3750000,
@@ -137,7 +148,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "airline",
-    name: "Regional Airline",
+    name: "Real Estate Rollup",
+    description: "Rent is forever.",
     baseCost: 80000000,
     costGrowth: 1.225,
     baseProfitPerCycle: 21000000,
@@ -148,7 +160,8 @@ export const BUSINESS_DEFS: BusinessDef[] = [
   },
   {
     id: "datacenter",
-    name: "Data Center",
+    name: "Cloud Infrastructure",
+    description: "If you host it, you control it.",
     baseCost: 400000000,
     costGrowth: 1.23,
     baseProfitPerCycle: 120000000,

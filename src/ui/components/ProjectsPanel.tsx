@@ -10,6 +10,7 @@ type ProjectsPanelProps = {
   incomePerSec: number;
   now: number;
   onStart: (id: string) => void;
+  showHeader?: boolean;
 };
 
 const formatEffect = (project: ProjectDef) => {
@@ -27,9 +28,9 @@ const formatEffect = (project: ProjectDef) => {
     parts.push(`-${speed}% cycle time`);
   }
   if (project.effect.autoRunAll) {
-    parts.push("Auto-run all businesses");
+    parts.push("Auto-run all operations");
   }
-  return parts.join(" · ");
+  return parts.join(" / ");
 };
 
 const ProjectsPanel = ({
@@ -40,17 +41,20 @@ const ProjectsPanel = ({
   incomePerSec,
   now,
   onStart,
+  showHeader = true,
 }: ProjectsPanelProps) => {
   const slotsUsed = runningProjects.length;
 
   return (
     <section className="projects-panel">
-      <div className="projects-header">
-        <h2>Projects</h2>
-        <div className="projects-slots">
-          Slots {slotsUsed}/{projectSlots}
+      {showHeader && (
+        <div className="projects-header">
+          <h2>Operations</h2>
+          <div className="projects-slots">
+            Slots {slotsUsed}/{projectSlots}
+          </div>
         </div>
-      </div>
+      )}
 
       {runningProjects.length > 0 && (
         <div className="projects-running">
@@ -84,12 +88,12 @@ const ProjectsPanel = ({
 
       <div className="projects-available">
         {projects.length === 0 ? (
-          <div className="projects-empty">No projects available right now.</div>
+          <div className="projects-empty">No operations available right now.</div>
         ) : (
           projects.map((project) => {
             const cost = getProjectCost(incomePerSec, project);
             const canAfford = cost > 0 && cash >= cost && slotsUsed < projectSlots;
-            const label = slotsUsed >= projectSlots ? "Slots full" : "Start Project";
+            const label = slotsUsed >= projectSlots ? "Slots full" : "Start Operation";
 
             return (
               <div className="project-card" key={project.id}>

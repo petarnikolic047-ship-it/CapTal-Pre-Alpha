@@ -250,14 +250,14 @@ export const formatGoalLabel = (goal: GoalState) => {
     return `Buy ${goal.target} upgrade${goal.target === 1 ? "" : "s"}`;
   }
   if (goal.type === "start-project") {
-    return `Start ${goal.target} project${goal.target === 1 ? "" : "s"}`;
+    return `Start ${goal.target} operation${goal.target === 1 ? "" : "s"}`;
   }
   if (goal.type === "hire-manager" && goal.businessId) {
     const name = BUSINESS_BY_ID[goal.businessId]?.name ?? "Business";
-    return `Hire ${name} manager`;
+    return `Hire ${name} handler`;
   }
   if (goal.type === "upgrade-hq") {
-    return `Upgrade HQ to level ${goal.target}`;
+    return `Upgrade Head Office to level ${goal.target}`;
   }
   if (goal.type === "upgrade-building" && goal.buildingTypeId) {
     const name = BUILDING_BY_ID[goal.buildingTypeId]?.name ?? "Building";
@@ -277,7 +277,7 @@ export const formatGoalReward = (goal: GoalState) => {
     const name = BUSINESS_BY_ID[goal.reward.businessId]?.name ?? "Business";
     return `+${Math.round((goal.reward.mult - 1) * 100)}% ${name} profit for 5m`;
   }
-  return `-10% project time for 5m`;
+  return `-10% operation time for 5m`;
 };
 
 export const pickRandomGoals = (pool: GoalState[], count: number, excludeIds: string[]) => {

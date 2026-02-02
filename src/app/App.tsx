@@ -24,10 +24,10 @@ import GoalsBar from "../ui/components/GoalsBar";
 import NextActionBar from "../ui/components/NextActionBar";
 import ProjectsPanel from "../ui/components/ProjectsPanel";
 import SafePanel from "../ui/components/SafePanel";
-import StatBar from "../ui/components/StatBar";
 import UpgradesPanel from "../ui/components/UpgradesPanel";
 import WarRoom from "../ui/components/WarRoom";
 import WorkButton from "../ui/components/WorkButton";
+import ToastStack from "../ui/components/ToastStack";
 import type { GoalContext } from "../game/goals";
 import { getGoalProgress } from "../game/goals";
 
@@ -73,13 +73,19 @@ const App = () => {
   const theftThreshold = useGameStore((state) => state.getTheftThreshold());
   const runningProjects = useGameStore((state) => state.runningProjects);
   const completedProjects = useGameStore((state) => state.completedProjects);
+  const trophies = useGameStore((state) => state.war.trophies);
+  const uiEvents = useGameStore((state) => state.uiEvents);
+  const dismissUiEvent = useGameStore((state) => state.dismissUiEvent);
+  const queueSlots = useGameStore((state) => state.getBuildQueueSlots());
 
   const [now, setNow] = useState(() => Date.now());
   const [buyFeedback, setBuyFeedback] = useState<BuyFeedback>(() => ({}));
   const [showUpgrades, setShowUpgrades] = useState(false);
-  const [activeScreen, setActiveScreen] = useState<"base" | "market" | "war">("base");
   const [showGoals, setShowGoals] = useState(false);
   const [showSafe, setShowSafe] = useState(false);
+  const [showMarket, setShowMarket] = useState(false);
+  const [showWar, setShowWar] = useState(false);
+  const [showOperations, setShowOperations] = useState(false);
 
   useEffect(() => {
     let frameId = 0;
@@ -152,6 +158,64 @@ const App = () => {
     [completedProjects, runningProjects, totalEarned, hqLevel]
   );
 
+  const queueCount = buildQueue.active.length;
+  const nextQueueFinish = buildQueue.active.reduce(
+    (min, item) => (item.finishAt < min ? item.finishAt : min),
+    Number.POSITIVE_INFINITY
+  );
+  const queueRemaining =
+    nextQueueFinish !== Number.POSITIVE_INFINITY ? Math.max(0, nextQueueFinish - now) : 0;
+
+  const buildingsBuiltCount = Object.values(buildings).filter(
+    (building) => building.typeId !== "hq"
+  ).length;
+  const hasTenUnits = BUSINESS_DEFS.some(
+    (def) => (businesses[def.id]?.count ?? 0) >= 10
+  );
+  const hasManager = BUSINESS_DEFS.some((def) => businesses[def.id]?.managerOwned);
+  const hasUpgradeStarted =
+    buildQueue.active.length > 0 ||
+    Object.values(buildings).some((building) => building.buildingLevel > 1);
+
+  const onboardingStep = useMemo(() => {
+    const steps = [
+      {
+        id: "place",
+        title: "Place your first asset",
+        hint: "Tap an empty plot to build.",
+        complete: buildingsBuiltCount > 0,
+      },
+      {
+        id: "units",
+        title: "Buy 10 units",
+        hint: "Open an asset and buy units.",
+        complete: hasTenUnits,
+      },
+      {
+        id: "manager",
+        title: "Hire a handler",
+        hint: "Assign a handler to automate cycles.",
+        complete: hasManager,
+      },
+      {
+        id: "upgrade",
+        title: "Start an upgrade",
+        hint: "Start a building upgrade from the panel.",
+        complete: hasUpgradeStarted,
+      },
+    ];
+
+    const index = steps.findIndex((step) => !step.complete);
+    if (index === -1) {
+      return null;
+    }
+    return {
+      step: index + 1,
+      total: steps.length,
+      ...steps[index],
+    };
+  }, [buildingsBuiltCount, hasTenUnits, hasManager, hasUpgradeStarted]);
+
   const goalContext: GoalContext = useMemo(() => {
     const counts = BUSINESS_DEFS.reduce((acc, def) => {
       acc[def.id] = businesses[def.id]?.count ?? 0;
@@ -221,7 +285,6 @@ const App = () => {
       return ratio >= 0.8 && progress.current < progress.target;
     });
   }, [activeGoals, goalContext]);
-  const safeAlert = cash >= theftThreshold * 0.9;
 
   const nextAction = useMemo(() => {
     const hq = buildings.hq;
@@ -273,7 +336,7 @@ const App = () => {
         unlockParts.push(`${newBuyModes.map((mode) => mode.toUpperCase()).join(" / ")} buy`);
       }
       return {
-        title: `${cash >= cost ? "Upgrade" : "Save for"} HQ to L${hqLevel + 1}`,
+        title: `${cash >= cost ? "Upgrade" : "Save for"} Head Office to L${hqLevel + 1}`,
         detail: `${formatMoney(cost)} · ${formatDuration(duration)} → ${
           unlockParts.length > 0 ? unlockParts.join(" + ") : "new unlocks"
         }`,
@@ -287,7 +350,7 @@ const App = () => {
     if (managerTarget) {
       const cost = getManagerCost(managerTarget.id);
       return {
-        title: `${cash >= cost ? "Hire" : "Save for"} ${managerTarget.name} manager`,
+        title: `${cash >= cost ? "Hire" : "Save for"} ${managerTarget.name} handler`,
         detail: `${formatMoney(cost)} · auto-runs cycles`,
       };
     }
@@ -324,8 +387,8 @@ const App = () => {
       const project = availableProjects[0];
       const cost = getProjectCost(incomePerSec, project);
       return {
-        title: `${cash >= cost ? "Start" : "Save for"} project: ${project.name}`,
-        detail: `${formatMoney(cost)} · ${formatDuration(project.durationMs)}`,
+        title: `${cash >= cost ? "Start" : "Save for"} operation: ${project.name}`,
+        detail: `${formatMoney(cost)} / ${formatDuration(project.durationMs)}`,
       };
     }
 
@@ -367,173 +430,283 @@ const App = () => {
     <div className="app">
       <header className="app-header">
         <div>
-          <div className="app-kicker">PRE–PRE ALPHA</div>
-          <h1>AdCap Core Only</h1>
+          <div className="app-kicker">Your City</div>
+          <h1>Belograd District</h1>
         </div>
+        <div className="app-subtitle">Republic of Vrbija</div>
       </header>
 
-      <StatBar cash={cash} incomePerSec={incomePerSec} />
-      <NextActionBar title={nextAction.title} detail={nextAction.detail} />
-      <div className="hud-toggles">
-        <button
-          className={`hud-button ${showGoals ? "active" : ""}`}
-          type="button"
-          onClick={() => setShowGoals((prev) => !prev)}
-        >
+      <div className="city-hud">
+        <div className="city-cash">
+          <div className="city-cash-value">{formatMoney(cash)}</div>
+          <div className="city-cash-rate">+{formatMoney(incomePerSec)} / sec</div>
+        </div>
+        <div className="city-badges">
+          <div className="hud-badge">
+            Queue {queueCount}/{queueSlots} -{" "}
+            {queueCount > 0 ? formatDuration(queueRemaining) : "idle"}
+          </div>
+          <div className="hud-badge">Influence {trophies}</div>
+        </div>
+      </div>
+
+      <div className="panel-bar">
+        <button className="panel-button" type="button" onClick={() => setShowGoals(true)}>
           Goals
-          {goalsAlert && <span className="hud-dot" />}
+          {goalsAlert && <span className="upgrade-dot" />}
         </button>
         <button
-          className={`hud-button ${showSafe ? "active" : ""}`}
+          className="panel-button"
           type="button"
-          onClick={() => setShowSafe((prev) => !prev)}
+          onClick={() => setShowSafe(true)}
         >
           Safe
-          {safeAlert && <span className="hud-dot" />}
+          {theftRisk && <span className="upgrade-dot" />}
         </button>
-      </div>
-      {showGoals && <GoalsBar goals={activeGoals} context={goalContext} />}
-      {showSafe && (
-        <SafePanel
-          cash={cash}
-          safeCash={safeCash}
-          theftThreshold={theftThreshold}
-          theftRisk={theftRisk}
-          onDeposit={depositSafe}
-          onWithdraw={withdrawSafe}
-        />
-      )}
-      <WorkButton onWork={tapWork} />
-
-      <div className="screen-tabs">
-        <div className="tab-group">
-          <button
-            className={`tab-button ${activeScreen === "base" ? "active" : ""}`}
-            type="button"
-            onClick={() => setActiveScreen("base")}
-          >
-            Base
-          </button>
-          <button
-            className={`tab-button ${activeScreen === "market" ? "active" : ""}`}
-            type="button"
-            onClick={() => setActiveScreen("market")}
-          >
-            Market
-          </button>
-          <button
-            className={`tab-button ${activeScreen === "war" ? "active" : ""}`}
-            type="button"
-            onClick={() => setActiveScreen("war")}
-          >
-            War Room
-          </button>
-        </div>
         <button
-          className="upgrades-button"
+          className="panel-button"
+          type="button"
+          onClick={() => setShowOperations(true)}
+        >
+          Operations
+        </button>
+        <button
+          className="panel-button"
           type="button"
           onClick={() => setShowUpgrades(true)}
         >
-          Upgrades
+          Board Offers
           {upgradeOfferDefs.length > 0 && <span className="upgrade-dot" />}
+        </button>
+        <button className="panel-button" type="button" onClick={() => setShowWar(true)}>
+          War Room
+        </button>
+        <button className="panel-button" type="button" onClick={() => setShowMarket(true)}>
+          Data
         </button>
       </div>
 
-      {activeScreen === "base" ? (
-        <BaseScreen now={now} buyMode={buyMode} cash={cash} />
-      ) : activeScreen === "market" ? (
-        <section className="business-panel">
-          <div className="business-controls">
-            <BuyModeToggle value={buyMode} onChange={setBuyMode} allowedModes={unlockedBuyModes} />
-            <button
-              className="run-all-button"
-              type="button"
-              onClick={runAllBusinesses}
-              disabled={!canRunAll}
-            >
-              Run All
-            </button>
+      {onboardingStep ? (
+        <div className="onboarding-rail">
+          <div className="onboarding-kicker">
+            Step {onboardingStep.step}/{onboardingStep.total}
           </div>
-
-          <div className="business-list">
-            {marketBusinessDefs.map((def) => {
-              const business = getBusinessState(def.id);
-              const profitPerCycle = getBusinessProfitPerCycle(def.id);
-              const cycleTimeMs = getBusinessCycleTimeMs(def.id);
-              const nextCost = getBusinessNextCost(def.id);
-              const buyInfo = getBusinessBuyInfo(def.id);
-              const managerCost = getManagerCost(def.id);
-              const nextMilestone = getNextMilestone(def.id);
-              const feedback = buyFeedback[def.id];
-              const lastBoughtQty =
-                feedback && now - feedback.at < 1500 ? feedback.qty : undefined;
-
-              const progress = (() => {
-                if (!business.running || !business.endsAt || cycleTimeMs <= 0) {
-                  return 0;
-                }
-                const remainingRaw = business.endsAt - now;
-                let remaining = remainingRaw;
-                if (remaining < 0) {
-                  const overshoot = Math.abs(remaining) % cycleTimeMs;
-                  remaining = cycleTimeMs - overshoot;
-                }
-                const clampedRemaining = Math.min(Math.max(remaining, 0), cycleTimeMs);
-                return 1 - clampedRemaining / cycleTimeMs;
-              })();
-
-              const handleBuy = () => {
-                if (buyInfo.quantity <= 0 || cash < buyInfo.cost) {
-                  return;
-                }
-                buyBusiness(def.id);
-                setBuyFeedback((prev) => ({
-                  ...prev,
-                  [def.id]: { qty: buyInfo.quantity, at: Date.now() },
-                }));
-              };
-
-              return (
-                <BusinessCard
-                  key={def.id}
-                  def={def}
-                  business={business}
-                  profitPerCycle={profitPerCycle}
-                  cycleTimeMs={cycleTimeMs}
-                  nextCost={nextCost}
-                  buyInfo={buyInfo}
-                  buyMode={buyMode}
-                  canAffordBuy={buyInfo.quantity > 0 && cash >= buyInfo.cost}
-                  managerCost={managerCost}
-                  canAffordManager={cash >= managerCost}
-                  nextMilestone={nextMilestone}
-                  progress={progress}
-                  lastBoughtQty={lastBoughtQty}
-                  onRun={() => runBusiness(def.id)}
-                  onBuy={handleBuy}
-                  onHireManager={() => hireManager(def.id)}
-                />
-              );
-            })}
-          </div>
-
-          <div className="market-note">
-            Market is for tuning. Base is the main play screen.
-          </div>
-        </section>
+          <div className="onboarding-title">{onboardingStep.title}</div>
+          <div className="onboarding-hint">{onboardingStep.hint}</div>
+        </div>
       ) : (
-        <WarRoom now={now} cash={cash} incomePerSec={incomePerSec} />
+        <NextActionBar title={nextAction.title} detail={nextAction.detail} />
       )}
 
-      <ProjectsPanel
-        projects={availableProjects}
-        runningProjects={runningProjects}
-        projectSlots={projectSlots}
-        cash={cash}
-        incomePerSec={incomePerSec}
-        now={now}
-        onStart={startProject}
-      />
+      <BaseScreen now={now} buyMode={buyMode} cash={cash} />
+
+      <div className="work-fab">
+        <WorkButton onWork={tapWork} />
+      </div>
+
+      <ToastStack events={uiEvents} onDismiss={dismissUiEvent} />
+
+      {showGoals && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setShowGoals(false)}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2>Goals</h2>
+              <button className="modal-close" type="button" onClick={() => setShowGoals(false)}>
+                Close
+              </button>
+            </div>
+            <GoalsBar goals={activeGoals} context={goalContext} showHeader={false} />
+          </div>
+        </div>
+      )}
+
+      {showSafe && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setShowSafe(false)}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2>Safehouse Vault</h2>
+              <button className="modal-close" type="button" onClick={() => setShowSafe(false)}>
+                Close
+              </button>
+            </div>
+            <SafePanel
+              cash={cash}
+              safeCash={safeCash}
+              theftThreshold={theftThreshold}
+              theftRisk={theftRisk}
+              onDeposit={depositSafe}
+              onWithdraw={withdrawSafe}
+            />
+          </div>
+        </div>
+      )}
+
+      {showOperations && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setShowOperations(false)}
+        >
+          <div
+            className="modal-card modal-scroll"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h2>Operations</h2>
+                <div className="modal-subtitle">Long-term protocols and infrastructure.</div>
+              </div>
+              <button
+                className="modal-close"
+                type="button"
+                onClick={() => setShowOperations(false)}
+              >
+                Close
+              </button>
+            </div>
+            <ProjectsPanel
+              projects={availableProjects}
+              runningProjects={runningProjects}
+              projectSlots={projectSlots}
+              cash={cash}
+              incomePerSec={incomePerSec}
+              now={now}
+              onStart={startProject}
+              showHeader={false}
+            />
+          </div>
+        </div>
+      )}
+
+      {showWar && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setShowWar(false)}>
+          <div
+            className="modal-shell"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <WarRoom now={now} cash={cash} incomePerSec={incomePerSec} />
+          </div>
+        </div>
+      )}
+
+      {showMarket && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setShowMarket(false)}>
+          <div
+            className="modal-card modal-scroll"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h2>Data View</h2>
+                <div className="modal-subtitle">Tuning panel for economy balance.</div>
+              </div>
+              <button className="modal-close" type="button" onClick={() => setShowMarket(false)}>
+                Close
+              </button>
+            </div>
+            <section className="business-panel">
+              <div className="business-controls">
+                <BuyModeToggle
+                  value={buyMode}
+                  onChange={setBuyMode}
+                  allowedModes={unlockedBuyModes}
+                />
+                <button
+                  className="run-all-button"
+                  type="button"
+                  onClick={runAllBusinesses}
+                  disabled={!canRunAll}
+                >
+                  Run All
+                </button>
+              </div>
+
+              <div className="business-list">
+                {marketBusinessDefs.map((def) => {
+                  const business = getBusinessState(def.id);
+                  const profitPerCycle = getBusinessProfitPerCycle(def.id);
+                  const cycleTimeMs = getBusinessCycleTimeMs(def.id);
+                  const nextCost = getBusinessNextCost(def.id);
+                  const buyInfo = getBusinessBuyInfo(def.id);
+                  const managerCost = getManagerCost(def.id);
+                  const nextMilestone = getNextMilestone(def.id);
+                  const feedback = buyFeedback[def.id];
+                  const lastBoughtQty =
+                    feedback && now - feedback.at < 1500 ? feedback.qty : undefined;
+
+                  const progress = (() => {
+                    if (!business.running || !business.endsAt || cycleTimeMs <= 0) {
+                      return 0;
+                    }
+                    const remainingRaw = business.endsAt - now;
+                    let remaining = remainingRaw;
+                    if (remaining < 0) {
+                      const overshoot = Math.abs(remaining) % cycleTimeMs;
+                      remaining = cycleTimeMs - overshoot;
+                    }
+                    const clampedRemaining = Math.min(Math.max(remaining, 0), cycleTimeMs);
+                    return 1 - clampedRemaining / cycleTimeMs;
+                  })();
+
+                  const handleBuy = () => {
+                    if (buyInfo.quantity <= 0 || cash < buyInfo.cost) {
+                      return;
+                    }
+                    buyBusiness(def.id);
+                    setBuyFeedback((prev) => ({
+                      ...prev,
+                      [def.id]: { qty: buyInfo.quantity, at: Date.now() },
+                    }));
+                  };
+
+                  return (
+                    <BusinessCard
+                      key={def.id}
+                      def={def}
+                      business={business}
+                      profitPerCycle={profitPerCycle}
+                      cycleTimeMs={cycleTimeMs}
+                      nextCost={nextCost}
+                      buyInfo={buyInfo}
+                      buyMode={buyMode}
+                      canAffordBuy={buyInfo.quantity > 0 && cash >= buyInfo.cost}
+                      managerCost={managerCost}
+                      canAffordManager={cash >= managerCost}
+                      nextMilestone={nextMilestone}
+                      progress={progress}
+                      lastBoughtQty={lastBoughtQty}
+                      onRun={() => runBusiness(def.id)}
+                      onBuy={handleBuy}
+                      onHireManager={() => hireManager(def.id)}
+                    />
+                  );
+                })}
+              </div>
+
+              <div className="market-note">
+                Data view only. Base is the main play screen.
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+
       <UpgradesPanel
         isOpen={showUpgrades}
         offers={upgradeOfferDefs}

@@ -20,7 +20,7 @@ const formatEffect = (upgrade: UpgradeDef) => {
   if (upgrade.effect.timeMult) {
     parts.push(`${formatMultiplier(upgrade.effect.timeMult)} cycle time`);
   }
-  return parts.join(" · ");
+  return parts.join(" / ");
 };
 
 const UpgradesPanel = ({
@@ -46,7 +46,7 @@ const UpgradesPanel = ({
       >
         <div className="modal-header">
           <div>
-            <h2>Upgrades</h2>
+            <h2>Board Offers</h2>
             <div className="modal-subtitle">
               Offers refresh in {formatDuration(refreshInMs)}
             </div>
@@ -57,7 +57,7 @@ const UpgradesPanel = ({
         </div>
 
         {offers.length === 0 ? (
-          <div className="upgrades-empty">No upgrade offers yet.</div>
+          <div className="upgrades-empty">No offers yet.</div>
         ) : (
           <div className="upgrade-offers">
             {offers.map((upgrade) => {
@@ -67,6 +67,9 @@ const UpgradesPanel = ({
                 <div className="upgrade-card" key={upgrade.id}>
                   <div>
                     <div className="upgrade-name">{upgrade.name}</div>
+                    {upgrade.description && (
+                      <div className="upgrade-description">{upgrade.description}</div>
+                    )}
                     <div className="upgrade-effect">{formatEffect(upgrade)}</div>
                     <div className="upgrade-meta">
                       Target {formatDuration(upgrade.targetSeconds * 1000)} of income
@@ -91,3 +94,4 @@ const UpgradesPanel = ({
 };
 
 export default UpgradesPanel;
+

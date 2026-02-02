@@ -16,6 +16,7 @@ export type UpgradeUnlock = {
 export type UpgradeDef = {
   id: string;
   name: string;
+  description: string;
   targetSeconds: number;
   kind: UpgradeKind;
   targetBusinessId?: BusinessId;
@@ -26,7 +27,8 @@ export type UpgradeDef = {
 export const UPGRADE_DEFS: UpgradeDef[] = [
   {
     id: "lemonade-promo",
-    name: "Lemonade Promo",
+    name: "Backroom Card Table Spotlight",
+    description: "Increase Backroom Card Table profit.",
     targetSeconds: 60,
     kind: "business",
     targetBusinessId: "lemonade",
@@ -35,7 +37,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "lemonade-efficiency",
-    name: "Lemonade Efficiency Kit",
+    name: "Backroom Card Table Process Kit",
+    description: "Reduce Backroom Card Table cycle time.",
     targetSeconds: 180,
     kind: "business",
     targetBusinessId: "lemonade",
@@ -44,7 +47,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "newspaper-promo",
-    name: "Newspaper Promo",
+    name: "Clickfarm Studio Spotlight",
+    description: "Increase Clickfarm Studio profit.",
     targetSeconds: 90,
     kind: "business",
     targetBusinessId: "newspaper",
@@ -53,7 +57,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "newspaper-efficiency",
-    name: "Newspaper Efficiency Kit",
+    name: "Clickfarm Studio Process Kit",
+    description: "Reduce Clickfarm Studio cycle time.",
     targetSeconds: 240,
     kind: "business",
     targetBusinessId: "newspaper",
@@ -62,7 +67,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "carwash-promo",
-    name: "Car Wash Promo",
+    name: "Course Academy Lite Spotlight",
+    description: "Increase Course Academy Lite profit.",
     targetSeconds: 120,
     kind: "business",
     targetBusinessId: "carwash",
@@ -71,7 +77,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "carwash-efficiency",
-    name: "Car Wash Efficiency Kit",
+    name: "Course Academy Lite Process Kit",
+    description: "Reduce Course Academy Lite cycle time.",
     targetSeconds: 300,
     kind: "business",
     targetBusinessId: "carwash",
@@ -80,7 +87,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "pizza-promo",
-    name: "Pizza Shop Promo",
+    name: "Refund Desk Spotlight",
+    description: "Increase Refund Desk profit.",
     targetSeconds: 180,
     kind: "business",
     targetBusinessId: "pizza",
@@ -89,7 +97,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "pizza-efficiency",
-    name: "Pizza Shop Efficiency Kit",
+    name: "Refund Desk Process Kit",
+    description: "Reduce Refund Desk cycle time.",
     targetSeconds: 420,
     kind: "business",
     targetBusinessId: "pizza",
@@ -98,7 +107,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "coffee-promo",
-    name: "Coffee Cart Promo",
+    name: "Cafe Front Spotlight",
+    description: "Increase Cafe Front profit.",
     targetSeconds: 240,
     kind: "business",
     targetBusinessId: "coffee",
@@ -107,7 +117,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "coffee-efficiency",
-    name: "Coffee Cart Efficiency Kit",
+    name: "Cafe Front Process Kit",
+    description: "Reduce Cafe Front cycle time.",
     targetSeconds: 600,
     kind: "business",
     targetBusinessId: "coffee",
@@ -116,7 +127,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "foodtruck-promo",
-    name: "Food Truck Promo",
+    name: "Delivery Kiosk Spotlight",
+    description: "Increase Delivery Kiosk profit.",
     targetSeconds: 300,
     kind: "business",
     targetBusinessId: "foodtruck",
@@ -125,7 +137,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "foodtruck-efficiency",
-    name: "Food Truck Efficiency Kit",
+    name: "Delivery Kiosk Process Kit",
+    description: "Reduce Delivery Kiosk cycle time.",
     targetSeconds: 720,
     kind: "business",
     targetBusinessId: "foodtruck",
@@ -134,7 +147,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "gym-promo",
-    name: "Gym Promo",
+    name: "Influencer Agency Spotlight",
+    description: "Increase Influencer Agency profit.",
     targetSeconds: 360,
     kind: "business",
     targetBusinessId: "gym",
@@ -143,7 +157,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "gym-efficiency",
-    name: "Gym Efficiency Kit",
+    name: "Influencer Agency Process Kit",
+    description: "Reduce Influencer Agency cycle time.",
     targetSeconds: 900,
     kind: "business",
     targetBusinessId: "gym",
@@ -152,7 +167,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "laundromat-promo",
-    name: "Laundromat Promo",
+    name: "Local News Desk Spotlight",
+    description: "Increase Local News Desk profit.",
     targetSeconds: 420,
     kind: "business",
     targetBusinessId: "laundromat",
@@ -161,7 +177,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "laundromat-efficiency",
-    name: "Laundromat Efficiency Kit",
+    name: "Local News Desk Process Kit",
+    description: "Reduce Local News Desk cycle time.",
     targetSeconds: 1200,
     kind: "business",
     targetBusinessId: "laundromat",
@@ -170,7 +187,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "arcade-promo",
-    name: "Arcade Promo",
+    name: "Media Channel Spotlight",
+    description: "Increase Media Channel profit.",
     targetSeconds: 600,
     kind: "business",
     targetBusinessId: "arcade",
@@ -179,7 +197,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "arcade-efficiency",
-    name: "Arcade Efficiency Kit",
+    name: "Media Channel Process Kit",
+    description: "Reduce Media Channel cycle time.",
     targetSeconds: 1500,
     kind: "business",
     targetBusinessId: "arcade",
@@ -188,7 +207,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "hotel-promo",
-    name: "Hotel Promo",
+    name: "Logistics Yard Spotlight",
+    description: "Increase Logistics Yard profit.",
     targetSeconds: 900,
     kind: "business",
     targetBusinessId: "hotel",
@@ -197,7 +217,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "hotel-efficiency",
-    name: "Hotel Efficiency Kit",
+    name: "Logistics Yard Process Kit",
+    description: "Reduce Logistics Yard cycle time.",
     targetSeconds: 1800,
     kind: "business",
     targetBusinessId: "hotel",
@@ -206,7 +227,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "airline-promo",
-    name: "Airline Promo",
+    name: "Real Estate Rollup Spotlight",
+    description: "Increase Real Estate Rollup profit.",
     targetSeconds: 1200,
     kind: "business",
     targetBusinessId: "airline",
@@ -215,7 +237,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "airline-efficiency",
-    name: "Airline Efficiency Kit",
+    name: "Real Estate Rollup Process Kit",
+    description: "Reduce Real Estate Rollup cycle time.",
     targetSeconds: 2400,
     kind: "business",
     targetBusinessId: "airline",
@@ -224,7 +247,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "datacenter-promo",
-    name: "Data Center Promo",
+    name: "Cloud Infrastructure Spotlight",
+    description: "Increase Cloud Infrastructure profit.",
     targetSeconds: 1800,
     kind: "business",
     targetBusinessId: "datacenter",
@@ -233,7 +257,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "datacenter-efficiency",
-    name: "Data Center Efficiency Kit",
+    name: "Cloud Infrastructure Process Kit",
+    description: "Reduce Cloud Infrastructure cycle time.",
     targetSeconds: 3600,
     kind: "business",
     targetBusinessId: "datacenter",
@@ -242,7 +267,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "cashflow-playbook",
-    name: "Cashflow Playbook",
+    name: "Liquidity Playbook",
+    description: "Double profits across all operations.",
     targetSeconds: 120,
     kind: "global",
     effect: { profitMult: 2 },
@@ -250,7 +276,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "billboard-blitz",
-    name: "Billboard Blitz",
+    name: "Narrative Placement",
+    description: "Double profits across all operations.",
     targetSeconds: 300,
     kind: "global",
     effect: { profitMult: 2 },
@@ -258,7 +285,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "lean-ops",
-    name: "Lean Ops",
+    name: "Operational Discipline",
+    description: "Reduce all cycle times.",
     targetSeconds: 900,
     kind: "global",
     effect: { timeMult: 0.9 },
@@ -266,7 +294,8 @@ export const UPGRADE_DEFS: UpgradeDef[] = [
   },
   {
     id: "hyper-logistics",
-    name: "Hyper Logistics",
+    name: "Network Leverage",
+    description: "Double profits across all operations.",
     targetSeconds: 1800,
     kind: "global",
     effect: { profitMult: 2 },

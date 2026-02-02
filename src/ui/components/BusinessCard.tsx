@@ -55,6 +55,7 @@ const BusinessCard = ({
       <div className="business-header">
         <div>
           <h3>{def.name}</h3>
+          <div className="business-blurb">{def.description}</div>
           <div className="business-owned">Owned: {business.count}</div>
         </div>
         {business.managerOwned && <span className="business-auto">AUTO</span>}
@@ -95,7 +96,7 @@ const BusinessCard = ({
           onClick={onHireManager}
           disabled={!canAffordManager || business.managerOwned}
         >
-          {business.managerOwned ? "Manager Hired" : `Hire Manager (${formatMoney(managerCost)})`}
+          {business.managerOwned ? "Handler Assigned" : `Hire Handler (${formatMoney(managerCost)})`}
         </button>
         {lastBoughtQty ? <div className="buy-feedback">Bought {lastBoughtQty}</div> : null}
       </div>

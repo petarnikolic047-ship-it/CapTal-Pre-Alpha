@@ -42,13 +42,12 @@ import {
   createSeed,
   getLeagueConfig,
   getLeagueForTrophies,
-  pickFrom,
   randomFloat,
   sigmoid,
   WAR_TARGET_NAMES,
   WAR_TARGET_REFRESH_MS,
 } from "./war";
-import type { RaidEvent, WarState, WarTarget } from "./war";
+import type { BattleReport, RaidEvent, WarState, WarTarget } from "./war";
 import { getWarUpgradeCost, WAR_UPGRADE_BY_ID } from "./upgrades_war";
 
 export type BuyMode = "x1" | "x10" | "x100" | "max";
@@ -87,6 +86,17 @@ export type TempBuff = {
   expiresAt: number;
 };
 
+export type UiEventKind = "cash" | "buy" | "upgrade" | "raid" | "defense" | "manager" | "build";
+
+export type UiEvent = {
+  id: string;
+  kind: UiEventKind;
+  title: string;
+  detail?: string;
+  amount?: number;
+  at: number;
+};
+
 export type MilestoneInfo = {
   count: number;
   mult: number;
@@ -116,6 +126,8 @@ type GameState = {
   lastTheftLoss: number;
   activeGoals: GoalState[];
   activeBuffs: TempBuff[];
+  uiEvents: UiEvent[];
+  lastUiEventAt: number;
   projectsStarted: number;
   completedProjects: string[];
   runningProjects: ProjectRun[];
@@ -148,6 +160,7 @@ type GameActions = {
   processWarTick: (now: number) => void;
   syncOfflineProgress: (now: number) => void;
   markSeen: (now: number) => void;
+  dismissUiEvent: (id: string) => void;
 };
 
 type GameSelectors = {
@@ -225,6 +238,8 @@ const WAR_SHIELD_MS = 15 * 60 * 1000;
 const WAR_RAID_TROPHY_THRESHOLD = 20;
 const WAR_MAX_LOOT_MINUTES = 10;
 const WAR_MAX_LOSS_MINUTES = 6;
+const WAR_PWIN_SCALE = 20;
+const UI_EVENT_MIN_GAP_MS = 800;
 
 const MILESTONES: MilestoneInfo[] = [
   { count: 10, mult: 2 },
@@ -246,6 +261,26 @@ const clampToNumber = (value: unknown, fallback: number) => {
   }
   return Math.max(0, value);
 };
+
+const createUiEvent = (
+  kind: UiEventKind,
+  title: string,
+  detail: string | undefined,
+  amount: number | undefined,
+  now: number
+): UiEvent => ({
+  id: `${kind}-${now}-${Math.floor(Math.random() * 100000)}`,
+  kind,
+  title,
+  detail,
+  amount,
+  at: now,
+});
+
+const appendUiEvent = (state: GameState, event: UiEvent) => ({
+  uiEvents: [event, ...state.uiEvents].slice(0, 6),
+  lastUiEventAt: event.at,
+});
 
 const createDefaultBusinessState = (): BusinessCoreState => ({
   count: 0,
@@ -491,6 +526,75 @@ const normalizeWarState = (value: unknown, now: number): WarState => {
           const at =
             typeof item.at === "number" && Number.isFinite(item.at) ? item.at : now;
           const targetName = typeof item.targetName === "string" ? item.targetName : undefined;
+          const reportRaw =
+            item.report && typeof item.report === "object"
+              ? (item.report as Record<string, unknown>)
+              : null;
+          const report: BattleReport = {
+            kind: item.kind,
+            offense:
+              reportRaw && typeof reportRaw.offense === "number" && Number.isFinite(reportRaw.offense)
+                ? reportRaw.offense
+                : 0,
+            defense:
+              reportRaw && typeof reportRaw.defense === "number" && Number.isFinite(reportRaw.defense)
+                ? reportRaw.defense
+                : 0,
+            pWin:
+              reportRaw && typeof reportRaw.pWin === "number" && Number.isFinite(reportRaw.pWin)
+                ? reportRaw.pWin
+                : 0.5,
+            roll:
+              reportRaw && typeof reportRaw.roll === "number" && Number.isFinite(reportRaw.roll)
+                ? reportRaw.roll
+                : 0.5,
+            incomePerSec:
+              reportRaw &&
+              typeof reportRaw.incomePerSec === "number" &&
+              Number.isFinite(reportRaw.incomePerSec)
+                ? reportRaw.incomePerSec
+                : 0,
+            loot:
+              reportRaw && typeof reportRaw.loot === "number" && Number.isFinite(reportRaw.loot)
+                ? reportRaw.loot
+                : loot,
+            lootCap:
+              reportRaw && typeof reportRaw.lootCap === "number" && Number.isFinite(reportRaw.lootCap)
+                ? reportRaw.lootCap
+                : 0,
+            targetLoot:
+              reportRaw &&
+              typeof reportRaw.targetLoot === "number" &&
+              Number.isFinite(reportRaw.targetLoot)
+                ? reportRaw.targetLoot
+                : undefined,
+            lootMult:
+              reportRaw &&
+              typeof reportRaw.lootMult === "number" &&
+              Number.isFinite(reportRaw.lootMult)
+                ? reportRaw.lootMult
+                : undefined,
+            vaultProtectPct:
+              reportRaw &&
+              typeof reportRaw.vaultProtectPct === "number" &&
+              Number.isFinite(reportRaw.vaultProtectPct)
+                ? reportRaw.vaultProtectPct
+                : undefined,
+            lootableCash:
+              reportRaw &&
+              typeof reportRaw.lootableCash === "number" &&
+              Number.isFinite(reportRaw.lootableCash)
+                ? reportRaw.lootableCash
+                : undefined,
+            stealPct:
+              reportRaw && typeof reportRaw.stealPct === "number" && Number.isFinite(reportRaw.stealPct)
+                ? reportRaw.stealPct
+                : undefined,
+            lossMult:
+              reportRaw && typeof reportRaw.lossMult === "number" && Number.isFinite(reportRaw.lossMult)
+                ? reportRaw.lossMult
+                : undefined,
+          };
           return {
             id: item.id,
             kind: item.kind,
@@ -499,6 +603,7 @@ const normalizeWarState = (value: unknown, now: number): WarState => {
             trophiesDelta,
             at,
             targetName,
+            report,
           } as RaidEvent;
         })
         .filter((entry): entry is RaidEvent => Boolean(entry))
@@ -1047,16 +1152,22 @@ const generateWarTargets = (state: GameState, seed: number, now: number) => {
   ];
 
   let nextSeedValue = seed;
+  const availableNames = [...WAR_TARGET_NAMES];
   const targets: WarTarget[] = difficulties.map((entry, index) => {
-    const namePick = pickFrom(WAR_TARGET_NAMES, nextSeedValue);
-    nextSeedValue = namePick.next;
+    let name = "Rival Firm";
+    if (availableNames.length > 0) {
+      const nameRoll = randomFloat(nextSeedValue);
+      nextSeedValue = nameRoll.next;
+      const pickIndex = Math.floor(nameRoll.value * availableNames.length);
+      name = availableNames.splice(pickIndex, 1)[0] ?? name;
+    }
     const { value: noise, next } = randomFloat(nextSeedValue);
     nextSeedValue = next;
     const defense = defensePower * entry.defenseMult + noise * 6;
     const loot = incomePerSec * entry.lootSeconds * entry.lootVaultFactor;
     return {
       id: `target-${now}-${index}`,
-      name: namePick.item ?? "Rival Firm",
+      name,
       defense,
       loot,
       trophyWin: entry.trophyWin,
@@ -1395,6 +1506,8 @@ const createInitialState = () => {
     lastTheftLoss: 0,
     activeGoals: [],
     activeBuffs: [],
+    uiEvents: [],
+    lastUiEventAt: 0,
     projectsStarted: persisted.projectsStarted,
   };
 
@@ -1511,6 +1624,14 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       return;
     }
     const buildingId = `${typeId}-${plotId}`;
+    const now = Date.now();
+    const event = createUiEvent(
+      "build",
+      "Asset placed",
+      def.name,
+      undefined,
+      now
+    );
     const nextBuildings = {
       ...state.buildings,
       [buildingId]: {
@@ -1532,6 +1653,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         plots: nextPlots,
         selectedPlotId: plotId,
       },
+      ...appendUiEvent(state, event),
     });
   },
   startBuildingUpgrade: (buildingId) => {
@@ -1562,12 +1684,20 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         upgradingUntil: finishAt,
       },
     };
+    const event = createUiEvent(
+      "upgrade",
+      "Upgrade started",
+      BUILDING_BY_ID[building.typeId]?.name ?? "Building",
+      undefined,
+      Date.now()
+    );
     set({
       cash: state.cash - cost,
       buildings: nextBuildings,
       buildQueue: {
         active: [...state.buildQueue.active, { buildingId, finishAt }],
       },
+      ...appendUiEvent(state, event),
     });
   },
   buyBusiness: (id) => {
@@ -1604,10 +1734,19 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       };
     }
 
+    const event = createUiEvent(
+      "buy",
+      "Units acquired",
+      `${buyInfo.quantity} x ${def.name}`,
+      undefined,
+      Date.now()
+    );
+
     set({
       cash: state.cash - buyInfo.cost,
       businesses: nextBusinesses,
       bulkBuys: state.bulkBuys + (buyInfo.quantity >= 10 ? 1 : 0),
+      ...appendUiEvent(state, event),
     });
   },
   runBusiness: (id) => {
@@ -1681,6 +1820,13 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const derived = getBusinessDerived(state, def);
     const now = Date.now();
     const shouldAutoStart = business.count > 0 && !business.running;
+    const event = createUiEvent(
+      "manager",
+      "Handler assigned",
+      def.name,
+      undefined,
+      now
+    );
 
     set({
       cash: state.cash - cost,
@@ -1693,6 +1839,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
           endsAt: shouldAutoStart ? now + derived.cycleTimeMs : business.endsAt,
         },
       },
+      ...appendUiEvent(state, event),
     });
   },
   depositSafe: (amount) =>
@@ -1831,34 +1978,46 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const offense = getWarOffensePowerForState(state);
     const defense = target.defense;
     const leagueConfig = getLeagueConfig(state.war.league);
+    const incomePerSec = getIncomePerSecTotalForState(state);
     let seed = state.war.rngSeed;
     const roll = randomFloat(seed);
     seed = roll.next;
-    const pWin = sigmoid((offense - defense) / 20);
+    const pWin = sigmoid((offense - defense) / WAR_PWIN_SCALE);
     const win = roll.value < pWin;
     let cash = state.cash;
     let totalEarned = state.totalEarned;
     let loot = 0;
     let trophiesDelta = 0;
+    const lootMult = getWarLootMultForState(state);
+    const lootCap =
+      incomePerSec *
+      Math.min(WAR_MAX_LOOT_MINUTES, leagueConfig.attackLootCapMinutes) *
+      60;
 
     if (win) {
-      const lootMult = getWarLootMultForState(state);
-      const maxLoot = getIncomePerSecTotalForState(state) *
-        Math.min(WAR_MAX_LOOT_MINUTES, leagueConfig.attackLootCapMinutes) *
-        60;
-      loot = Math.min(target.loot * lootMult, maxLoot);
+      loot = Math.min(target.loot * lootMult, lootCap);
       cash += loot;
       totalEarned += loot;
       trophiesDelta = target.trophyWin;
     } else {
-      const repairCost = getIncomePerSecTotalForState(state) * 30;
-      cash = Math.max(0, cash - repairCost);
       trophiesDelta = -target.trophyLoss;
     }
 
     const nextTrophies = Math.max(0, state.war.trophies + trophiesDelta);
     const nextLeague = getLeagueForTrophies(nextTrophies);
     const cooldownMs = getWarAttackCooldownMsForState(state);
+    const report: BattleReport = {
+      kind: "attack",
+      offense,
+      defense,
+      pWin,
+      roll: roll.value,
+      incomePerSec,
+      loot,
+      lootCap,
+      targetLoot: target.loot,
+      lootMult,
+    };
     const raidLog: RaidEvent = {
       id: `attack-${now}-${target.id}`,
       kind: "attack",
@@ -1867,7 +2026,15 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       trophiesDelta,
       at: now,
       targetName: target.name,
+      report,
     };
+    const event = createUiEvent(
+      "raid",
+      win ? "Raid success" : "Raid failed",
+      target.name,
+      win ? loot : undefined,
+      now
+    );
 
     const generated = generateWarTargets(state, seed, now);
     set({
@@ -1883,6 +2050,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         targets: generated.targets,
         lastTargetsAt: now,
       },
+      ...appendUiEvent(state, event),
     });
   },
   processWarTick: (now) => {
@@ -1891,6 +2059,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     let cash = state.cash;
     let changed = false;
     let seed = war.rngSeed;
+    let pendingEvent: UiEvent | null = null;
 
     const shouldRefreshTargets =
       war.targets.length === 0 || now - war.lastTargetsAt >= WAR_TARGET_REFRESH_MS;
@@ -1928,27 +2097,29 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       const rollOffense = randomFloat(seed);
       seed = rollOffense.next;
       const attackerOffense = offenseBase * (0.8 + rollOffense.value * 0.5);
-      const pDefend = sigmoid((defensePower - attackerOffense) / 20);
+      const pDefend = sigmoid((defensePower - attackerOffense) / WAR_PWIN_SCALE);
       const rollResult = randomFloat(seed);
       seed = rollResult.next;
       const defended = rollResult.value < pDefend;
       let loss = 0;
       let trophiesDelta = defended ? 2 : -4;
+      const incomePerSec = getIncomePerSecTotalForState(state);
+      const vaultProtectPct = getWarVaultProtectPctForState(state);
+      const lossMult = getWarLossMultForState(state);
+      const capMinutes = Math.min(
+        WAR_MAX_LOSS_MINUTES,
+        leagueConfig.defenseLossCapMinutes
+      );
+      const lootCap = incomePerSec * capMinutes * 60;
+      let stealPct = 0;
+      let lootableCash = 0;
 
       if (!defended) {
-        const incomePerSec = getIncomePerSecTotalForState(state);
-        const capMinutes = Math.min(
-          WAR_MAX_LOSS_MINUTES,
-          leagueConfig.defenseLossCapMinutes
-        );
-        const vaultProtect = getWarVaultProtectPctForState(state);
-        const lootableCash = Math.max(0, cash * (1 - vaultProtect));
+        lootableCash = Math.max(0, cash * (1 - vaultProtectPct));
         const rollLoss = randomFloat(seed);
         seed = rollLoss.next;
-        const stealPct = 0.5 + rollLoss.value * 0.5;
-        const maxLoss = incomePerSec * capMinutes * 60;
-        const lossMult = getWarLossMultForState(state);
-        loss = Math.min(lootableCash, maxLoss * stealPct * lossMult);
+        stealPct = 0.06 + rollLoss.value * 0.06;
+        loss = Math.min(lootableCash * stealPct * lossMult, lootCap);
         cash = Math.max(0, cash - loss);
       }
 
@@ -1956,6 +2127,20 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       seed = schedule.seed;
       const nextTrophies = Math.max(0, war.trophies + trophiesDelta);
       const nextLeague = getLeagueForTrophies(nextTrophies);
+      const report: BattleReport = {
+        kind: "defense",
+        offense: attackerOffense,
+        defense: defensePower,
+        pWin: pDefend,
+        roll: rollResult.value,
+        incomePerSec,
+        loot: loss,
+        lootCap,
+        vaultProtectPct,
+        lootableCash,
+        stealPct,
+        lossMult,
+      };
       const raidLog: RaidEvent = {
         id: `defense-${now}`,
         kind: "defense",
@@ -1963,7 +2148,15 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         loot: loss,
         trophiesDelta,
         at: now,
+        report,
       };
+      const event = createUiEvent(
+        "defense",
+        defended ? "Countermeasures triggered" : "Hostile action succeeded",
+        defended ? "No losses recorded" : "Asset extraction complete",
+        defended ? undefined : -loss,
+        now
+      );
 
       war = {
         ...war,
@@ -1974,6 +2167,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         raidLog: [raidLog, ...war.raidLog].slice(0, 10),
       };
       changed = true;
+
+      if (now - state.lastUiEventAt > UI_EVENT_MIN_GAP_MS) {
+        pendingEvent = event;
+      }
     } else if (now >= war.nextRaidAt && war.trophies < WAR_RAID_TROPHY_THRESHOLD) {
       const config = getLeagueConfig(war.league);
       const schedule = scheduleNextRaidAt(seed, config);
@@ -1990,10 +2187,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       changed = true;
     }
 
-    if (changed || cash !== state.cash) {
+    if (changed || cash !== state.cash || pendingEvent) {
       set({
         cash,
         war,
+        ...(pendingEvent ? appendUiEvent(state, pendingEvent) : {}),
       });
     }
   },
@@ -2005,6 +2203,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const autoRunAll = hasAutoRunAll(stateForCalc);
     let cash = Number.isFinite(state.cash) ? state.cash : 0;
     let totalEarned = Number.isFinite(state.totalEarned) ? state.totalEarned : cash;
+    let earnedThisTick = 0;
     let changed = buffsChanged;
     const nextBusinesses: Record<BusinessId, BusinessCoreState> = { ...state.businesses };
 
@@ -2053,6 +2252,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
           while (endsAt !== null && endsAt <= now && loops < MAX_CYCLE_CATCHUP) {
             cash += profitPerCycle;
             totalEarned += profitPerCycle;
+            earnedThisTick += profitPerCycle;
             endsAt += cycleTimeMs;
             loops += 1;
           }
@@ -2063,6 +2263,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         } else {
           cash += profitPerCycle;
           totalEarned += profitPerCycle;
+          earnedThisTick += profitPerCycle;
           running = false;
           endsAt = null;
         }
@@ -2084,12 +2285,19 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       }
     }
 
-    if (changed || cash !== state.cash || totalEarned !== state.totalEarned) {
+    const shouldToast =
+      earnedThisTick > 0 && now - state.lastUiEventAt > UI_EVENT_MIN_GAP_MS;
+    const event = shouldToast
+      ? createUiEvent("cash", "Cycle payout", "Liquidity captured", earnedThisTick, now)
+      : null;
+
+    if (changed || cash !== state.cash || totalEarned !== state.totalEarned || event) {
       set({
         cash,
         totalEarned,
         businesses: nextBusinesses,
         activeBuffs: buffsChanged ? activeBuffs : state.activeBuffs,
+        ...(event ? appendUiEvent(state, event) : {}),
       });
     }
   },
@@ -2325,6 +2533,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       set({ lastSeenAt: now });
     }
   },
+  dismissUiEvent: (id) =>
+    set((state) => ({
+      uiEvents: state.uiEvents.filter((event) => event.id !== id),
+    })),
   getBusinessState: (id) => {
     const state = get();
     const def = BUSINESS_BY_ID[id];

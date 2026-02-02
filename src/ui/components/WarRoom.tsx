@@ -27,6 +27,43 @@ const WarRoom = ({ now, cash, incomePerSec }: WarRoomProps) => {
   const shieldRemaining = war.shieldUntil ? Math.max(0, war.shieldUntil - now) : 0;
   const refreshRemaining = Math.max(0, WAR_TARGET_REFRESH_MS - (now - war.lastTargetsAt));
   const canAttack = attackCooldownRemaining <= 0;
+  const rivalryStatus = useMemo(() => {
+    const recentAttacks = war.raidLog.filter((entry) => entry.kind === "attack");
+    const lastTarget = recentAttacks[0]?.targetName;
+    if (!lastTarget) {
+      return null;
+    }
+    let streak = 0;
+    for (const entry of recentAttacks) {
+      if (entry.targetName !== lastTarget) {
+        break;
+      }
+      streak += 1;
+    }
+    if (streak >= 3) {
+      return {
+        title: "SHOWDOWN AVAILABLE",
+        detail: "They noticed you. Escalation is on the table.",
+      };
+    }
+    if (streak >= 2) {
+      return {
+        title: "RIVALRY ESCALATING",
+        detail: "The feud is getting louder.",
+      };
+    }
+    return null;
+  }, [war.raidLog]);
+  const latestRaid = war.raidLog[0];
+  const showBanner = latestRaid ? now - latestRaid.at < 15000 : false;
+  const bannerTitle =
+    latestRaid?.kind === "attack"
+      ? latestRaid.result === "win"
+        ? "Raid success"
+        : "Raid failed"
+      : latestRaid?.result === "win"
+      ? "Defense held"
+      : "Defense breached";
 
   const upgradesByKind = useMemo(() => {
     const groups: Record<WarUpgradeDef["kind"], WarUpgradeDef[]> = {
@@ -73,9 +110,30 @@ const WarRoom = ({ now, cash, incomePerSec }: WarRoomProps) => {
         </div>
       </div>
 
+      {showBanner && latestRaid && (
+        <div className={`war-banner ${latestRaid.result}`}>
+          <div>
+            <div className="war-banner-title">{bannerTitle}</div>
+            <div className="war-banner-detail">
+              {latestRaid.kind === "attack"
+                ? `Loot ${formatMoney(latestRaid.loot)} / Cap ${formatMoney(
+                    latestRaid.report.lootCap
+                  )}`
+                : `Loss ${formatMoney(latestRaid.loot)} / Protected ${Math.round(
+                    (latestRaid.report.vaultProtectPct ?? 0) * 100
+                  )}%`}
+            </div>
+          </div>
+          <div className="war-banner-meta">
+            Trophies {latestRaid.trophiesDelta >= 0 ? "+" : ""}
+            {latestRaid.trophiesDelta}
+          </div>
+        </div>
+      )}
+
       <div className="war-section">
         <div className="war-section-header">
-          <h3>Targets</h3>
+          <h3>Contracts</h3>
           <div className="war-section-actions">
             <button
               className="war-refresh"
@@ -92,16 +150,29 @@ const WarRoom = ({ now, cash, incomePerSec }: WarRoomProps) => {
             )}
           </div>
         </div>
+        {rivalryStatus && (
+          <div className="war-rivalry">
+            <div className="war-rivalry-title">{rivalryStatus.title}</div>
+            <div className="war-rivalry-detail">{rivalryStatus.detail}</div>
+          </div>
+        )}
         <div className="war-targets">
           {war.targets.map((target) => (
             <div className={`war-target-card ${target.difficulty}`} key={target.id}>
               <div className="war-target-info">
                 <div className="war-target-name">{target.name}</div>
                 <div className="war-target-meta">
-                  Defense {Math.round(target.defense)} · Loot {formatMoney(target.loot)}
+                  Loot {formatMoney(target.loot * 0.8)} - {formatMoney(target.loot * 1.2)}
                 </div>
                 <div className="war-target-meta">
-                  Trophies +{target.trophyWin} / -{target.trophyLoss}
+                  Risk {target.difficulty === "easy"
+                    ? "Low"
+                    : target.difficulty === "medium"
+                    ? "Medium"
+                    : "High"}
+                </div>
+                <div className="war-target-meta">
+                  Defense {Math.round(target.defense)} / Trophies +{target.trophyWin} / -{target.trophyLoss}
                 </div>
               </div>
               <div className="war-target-actions">
@@ -175,19 +246,29 @@ const WarRoom = ({ now, cash, incomePerSec }: WarRoomProps) => {
             const timeAgo = formatDuration(Math.max(0, now - entry.at));
             const title =
               entry.kind === "attack"
-                ? `Raided ${entry.targetName ?? "Target"}`
-                : "Defense raid";
+                ? `You vs ${entry.targetName ?? "Rival"}`
+                : "Defense action";
             const resultLabel = entry.result === "win" ? "Win" : "Loss";
             const lootLabel =
               entry.loot > 0
                 ? `${entry.result === "win" ? "+" : "-"}${formatMoney(entry.loot)}`
                 : "0";
             const trophiesLabel = entry.trophiesDelta !== 0 ? `${entry.trophiesDelta}` : "0";
+            const report = entry.report;
+            const pWinPct = Math.round(report.pWin * 100);
+            const rollPct = Math.round(report.roll * 100);
+            const reportLine =
+              entry.kind === "attack"
+                ? `Chance ${pWinPct}% - Roll ${rollPct}% - Cap ${formatMoney(report.lootCap)}`
+                : `Chance ${pWinPct}% - Roll ${rollPct}% - Steal ${Math.round(
+                    (report.stealPct ?? 0) * 100
+                  )}% - Protect ${Math.round((report.vaultProtectPct ?? 0) * 100)}%`;
             return (
               <div className="war-log-item" key={entry.id}>
                 <div>
                   <div className="war-log-title">{title}</div>
                   <div className="war-log-meta">{timeAgo} ago</div>
+                  <div className="war-log-meta">{reportLine}</div>
                 </div>
                 <div className={`war-log-result ${entry.result}`}>{resultLabel}</div>
                 <div className="war-log-meta">{lootLabel} cash</div>

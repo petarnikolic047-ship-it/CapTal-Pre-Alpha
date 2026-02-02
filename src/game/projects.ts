@@ -30,8 +30,8 @@ export type ProjectRun = {
 export const PROJECT_DEFS: ProjectDef[] = [
   {
     id: "offline-cap-2h",
-    name: "Offline Battery",
-    description: "Increase offline cap by +2 hours.",
+    name: "Continuity Plan",
+    description: "Extend offline cap by +2 hours.",
     durationMs: 10 * 60 * 1000,
     targetSeconds: 10 * 60,
     effect: { offlineCapSecondsAdd: 2 * 60 * 60 },
@@ -39,7 +39,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
   },
   {
     id: "profit-boost-25",
-    name: "Profit Protocol",
+    name: "Narrative Control",
     description: "Increase all profits by +25%.",
     durationMs: 15 * 60 * 1000,
     targetSeconds: 15 * 60,
@@ -48,7 +48,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
   },
   {
     id: "cycle-optimization",
-    name: "Cycle Optimization",
+    name: "Process Discipline",
     description: "Speed up all cycles by 10%.",
     durationMs: 20 * 60 * 1000,
     targetSeconds: 20 * 60,
@@ -57,8 +57,8 @@ export const PROJECT_DEFS: ProjectDef[] = [
   },
   {
     id: "auto-dispatch",
-    name: "Auto Dispatch",
-    description: "Auto-run all idle businesses.",
+    name: "Delegation Doctrine",
+    description: "Auto-run all idle operations.",
     durationMs: 25 * 60 * 1000,
     targetSeconds: 25 * 60,
     effect: { autoRunAll: true },
@@ -75,8 +75,8 @@ export const PROJECT_DEFS: ProjectDef[] = [
   },
   {
     id: "offline-cap-4h",
-    name: "Night Shift",
-    description: "Increase offline cap by +4 hours.",
+    name: "Vault Expansion",
+    description: "Extend offline cap by +4 hours.",
     durationMs: 35 * 60 * 1000,
     targetSeconds: 40 * 60,
     effect: { offlineCapSecondsAdd: 4 * 60 * 60 },
@@ -84,7 +84,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
   },
   {
     id: "cycle-overclock",
-    name: "Overclocked Lines",
+    name: "Distribution Pressure",
     description: "Speed up all cycles by 15%.",
     durationMs: 45 * 60 * 1000,
     targetSeconds: 45 * 60,
@@ -94,7 +94,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
   {
     id: "offline-cap-8h",
     name: "Deep Storage",
-    description: "Increase offline cap by +8 hours.",
+    description: "Extend offline cap by +8 hours.",
     durationMs: 60 * 60 * 1000,
     targetSeconds: 60 * 60,
     effect: { offlineCapSecondsAdd: 8 * 60 * 60 },
@@ -102,7 +102,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
   },
   {
     id: "profit-boost-100",
-    name: "Executive Efficiency",
+    name: "Board Alignment",
     description: "Increase all profits by +100%.",
     durationMs: 90 * 60 * 1000,
     targetSeconds: 90 * 60,
@@ -111,7 +111,7 @@ export const PROJECT_DEFS: ProjectDef[] = [
   },
   {
     id: "cycle-mastery",
-    name: "Cycle Mastery",
+    name: "Executive Efficiency",
     description: "Speed up all cycles by 25%.",
     durationMs: 120 * 60 * 1000,
     targetSeconds: 120 * 60,

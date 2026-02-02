@@ -4,14 +4,17 @@ import { formatGoalLabel, formatGoalReward, getGoalProgress } from "../../game/g
 type GoalsBarProps = {
   goals: GoalState[];
   context: GoalContext;
+  showHeader?: boolean;
 };
 
-const GoalsBar = ({ goals, context }: GoalsBarProps) => {
+const GoalsBar = ({ goals, context, showHeader = true }: GoalsBarProps) => {
   return (
     <section className="goals-bar">
-      <div className="goals-header">
-        <h2>Goals</h2>
-      </div>
+      {showHeader && (
+        <div className="goals-header">
+          <h2>Goals</h2>
+        </div>
+      )}
       {goals.length === 0 ? (
         <div className="goals-empty">No goals right now.</div>
       ) : (
